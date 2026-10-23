@@ -1,45 +1,29 @@
-"""Thin wrapper over the Garmin Health / Activity REST API."""
+"""Thin read-only wrapper over the Garmin Connect Personal API."""
 
 from __future__ import annotations
 
-import time
+import datetime as dt
+from typing import Union
 
 import requests
 
 from .auth import get_access_token
 from .config import Settings
 
-WELLNESS = "/wellness-api/rest"
-
-# Summary types available on the pull and backfill endpoints. Which ones work
-# depends on the APIs and permissions enabled for your app.
-SUMMARY_TYPES = (
-    "dailies",
-    "epochs",
-    "sleeps",
-    "bodyComps",
-    "stressDetails",
-    "userMetrics",
-    "pulseox",
-    "respiration",
-    "hrv",
-    "healthSnapshot",
-    "skinTemp",
-    "activities",
-    "activityDetails",
-    "moveiq",
-)
-
-# Garmin limits pull queries to a 24h window and backfill requests to 90 days.
-MAX_PULL_WINDOW = 86400
-MAX_BACKFILL_WINDOW = 90 * 86400
+DateLike = Union[dt.date, str]
 
 
-def time_windows(start: int, end: int, size: int):
-    """Split [start, end) into consecutive windows of at most `size` seconds."""
-    while start < end:
-        yield start, min(start + size, end)
-        start += size
+def as_date(value: DateLike) -> dt.date:
+    return value if isinstance(value, dt.date) else dt.date.fromisoformat(value)
+
+
+def date_windows(start: DateLike, end: DateLike, max_days: int):
+    """Split the inclusive range [start, end] into windows of at most `max_days` days."""
+    start, end = as_date(start), as_date(end)
+    while start <= end:
+        window_end = min(start + dt.timedelta(days=max_days - 1), end)
+        yield start, window_end
+        start = window_end + dt.timedelta(days=1)
 
 
 class GarminClient:
@@ -47,43 +31,114 @@ class GarminClient:
         self.settings = settings or Settings.from_env()
         self.session = requests.Session()
 
-    def _request(self, method: str, path: str, **kwargs) -> requests.Response:
-        headers = {"Authorization": f"Bearer {get_access_token(self.settings)}"}
-        resp = self.session.request(
-            method, self.settings.api_base + path, headers=headers, timeout=60, **kwargs
-        )
+    def _request(self, path: str, params: dict | None = None, accept: str = "application/json"):
+        resp = None
+        # Retry once with a freshly exchanged token if the cached one was rejected.
+        for force_refresh in (False, True):
+            token = get_access_token(self.settings, force_refresh=force_refresh)
+            resp = self.session.get(
+                self.settings.base_url + path,
+                params=params,
+                headers={"Authorization": f"Bearer {token}", "Accept": accept},
+                timeout=60,
+            )
+            if resp.status_code != 401:
+                break
         if not resp.ok:
-            raise RuntimeError(f"{method} {path} failed ({resp.status_code}): {resp.text}")
+            raise RuntimeError(f"GET {path} failed ({resp.status_code}): {resp.text[:500]}")
         return resp
 
-    def user_id(self) -> str:
-        return self._request("GET", f"{WELLNESS}/user/id").json()["userId"]
+    def get(self, path: str, params: dict | None = None):
+        """GET any supported endpoint and return the decoded JSON."""
+        resp = self._request(path, params)
+        return resp.json() if resp.content else None
 
-    def permissions(self) -> list[str]:
-        return self._request("GET", f"{WELLNESS}/user/permissions").json()
-
-    def pull(self, summary_type: str, start: int, end: int | None = None) -> list[dict]:
-        """Fetch summaries uploaded to Garmin between `start` and `end` (epoch seconds)."""
-        end = end or int(time.time())
-        items: list[dict] = []
-        for s, e in time_windows(start, end, MAX_PULL_WINDOW):
-            resp = self._request(
-                "GET",
-                f"{WELLNESS}/{summary_type}",
-                params={"uploadStartTimeInSeconds": s, "uploadEndTimeInSeconds": e},
-            )
-            items.extend(resp.json())
+    def _ranged(self, max_days: int, start: DateLike, end: DateLike, fetch) -> list:
+        """Call `fetch(start, end)` per window of at most `max_days` days and merge the lists."""
+        items: list = []
+        for s, e in date_windows(start, end, max_days):
+            result = fetch(s.isoformat(), e.isoformat())
+            if isinstance(result, list):
+                items.extend(result)
+            elif result is not None:
+                items.append(result)
         return items
 
-    def request_backfill(self, summary_type: str, start: int, end: int) -> None:
-        """Ask Garmin to re-send historical summaries for [start, end).
+    # Profile
 
-        Backfill is asynchronous: Garmin delivers the data to the push/ping
-        endpoints configured for your app in the developer portal.
-        """
-        for s, e in time_windows(start, end, MAX_BACKFILL_WINDOW):
-            self._request(
-                "GET",
-                f"{WELLNESS}/backfill/{summary_type}",
-                params={"summaryStartTimeInSeconds": s, "summaryEndTimeInSeconds": e},
-            )
+    def profile_settings(self) -> dict:
+        return self.get("/userprofile-service/userprofile/settings")
+
+    def heart_rate_zones(self):
+        return self.get("/biometric-service/heartRateZones/v2")
+
+    # Daily health summaries (date ranges are inclusive, YYYY-MM-DD or date objects)
+
+    def daily_summaries(self, start: DateLike, end: DateLike) -> list:
+        return self._ranged(180, start, end, lambda s, e: self.get(
+            "/usersummary-service/v2/dailysummaries", {"startDate": s, "endDate": e}))
+
+    def sleep_summaries(self, start: DateLike, end: DateLike) -> list:
+        return self._ranged(28, start, end, lambda s, e: self.get(
+            "/sleep-service/sleep/dailySleepSummariesByDate", {"startDate": s, "endDate": e}))
+
+    def hrv_summaries(self, start: DateLike, end: DateLike) -> list:
+        return self._ranged(180, start, end, lambda s, e: self.get(
+            f"/hrv-service/hrv/daily/{s}/{e}"))
+
+    def body_battery(self, start: DateLike, end: DateLike) -> list:
+        return self._ranged(28, start, end, lambda s, e: self.get(
+            "/wellness-service/wellness/bodyBattery/reports/daily", {"startDate": s, "endDate": e}))
+
+    def daily_stress(self, start: DateLike, end: DateLike) -> list:
+        return self._ranged(7, start, end, lambda s, e: self.get(
+            f"/usersummary-service/stats/stress/daily/{s}/{e}"))
+
+    def daily_steps(self, start: DateLike, end: DateLike) -> list:
+        return self._ranged(7, start, end, lambda s, e: self.get(
+            f"/usersummary-service/stats/steps/daily/{s}/{e}"))
+
+    def weight(self, start: DateLike, end: DateLike):
+        return self.get(
+            f"/weight-service/weight/range/{as_date(start)}/{as_date(end)}", {"includeAll": "true"}
+        )
+
+    # Single-day detail
+
+    def sleep(self, day: DateLike):
+        return self.get("/sleep-service/sleep/dailySleep", {"date": as_date(day).isoformat()})
+
+    def hrv(self, day: DateLike):
+        return self.get(f"/hrv-service/hrv/{as_date(day)}")
+
+    def heart_rate(self, day: DateLike):
+        return self.get("/wellness-service/wellness/dailyHeartRate", {"date": as_date(day).isoformat()})
+
+    # Activities
+
+    def activities(
+        self,
+        start: int = 0,
+        limit: int = 20,
+        start_date: DateLike | None = None,
+        end_date: DateLike | None = None,
+        activity_type: str | None = None,
+    ) -> list:
+        """Search activities, newest first. Garmin caps a page at about 50 items."""
+        params: dict = {"start": start, "limit": limit}
+        if start_date:
+            params["startDate"] = as_date(start_date).isoformat()
+        if end_date:
+            params["endDate"] = as_date(end_date).isoformat()
+        if activity_type:
+            params["activityType"] = activity_type
+        return self.get("/activitylist-service/activities/search/activities", params)
+
+    def activity(self, activity_id: int) -> dict:
+        return self.get(f"/activity-service/activity/{activity_id}")
+
+    def download_activity(self, activity_id: int) -> bytes:
+        """Return the original activity file as ZIP bytes (usually a .FIT inside)."""
+        return self._request(
+            f"/download-service/files/activity/{activity_id}", accept="application/octet-stream"
+        ).content

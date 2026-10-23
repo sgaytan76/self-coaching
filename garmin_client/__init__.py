@@ -1,4 +1,4 @@
-"""Client for the Garmin Connect Developer Program (Health / Activity API)."""
+"""Read-only client for the Garmin Connect Personal API."""
 
 from .client import GarminClient
 from .config import Settings

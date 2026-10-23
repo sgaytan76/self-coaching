@@ -9,35 +9,26 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 @dataclass(frozen=True)
 class Settings:
-    client_id: str
-    client_secret: str
-    redirect_uri: str
-    auth_url: str
-    token_url: str
-    api_base: str
+    api_key: str
+    base_url: str
     token_file: Path
 
     @classmethod
     def from_env(cls) -> "Settings":
         load_dotenv(PROJECT_ROOT / ".env")
-        client_id = os.getenv("GARMIN_CLIENT_ID", "").strip()
-        client_secret = os.getenv("GARMIN_CLIENT_SECRET", "").strip()
-        if not client_id or not client_secret:
+        api_key = os.getenv("GARMIN_PERSONAL_API_KEY", "").strip()
+        if not api_key:
             raise RuntimeError(
-                "GARMIN_CLIENT_ID and GARMIN_CLIENT_SECRET must be set in .env "
-                "(see .env.example)."
+                "GARMIN_PERSONAL_API_KEY must be set in .env (see .env.example). Create a key at "
+                "https://connect.garmin.com/app/settings/personalApiToken"
             )
-        token_file = Path(os.getenv("GARMIN_TOKEN_FILE", ".garmin_tokens.json"))
+        token_file = Path(os.getenv("GARMIN_TOKEN_FILE", ".garmin_token.json"))
         if not token_file.is_absolute():
             token_file = PROJECT_ROOT / token_file
         return cls(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=os.getenv("GARMIN_REDIRECT_URI", "http://localhost:8080/callback"),
-            auth_url=os.getenv("GARMIN_AUTH_URL", "https://connect.garmin.com/oauth2Confirm"),
-            token_url=os.getenv(
-                "GARMIN_TOKEN_URL", "https://diauth.garmin.com/di-oauth2-service/oauth/token"
-            ),
-            api_base=os.getenv("GARMIN_API_BASE", "https://apis.garmin.com").rstrip("/"),
+            api_key=api_key,
+            base_url=os.getenv(
+                "GARMIN_PERSONAL_API_BASE_URL", "https://personal.connectapi.garmin.com"
+            ).rstrip("/"),
             token_file=token_file,
         )

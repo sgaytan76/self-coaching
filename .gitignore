@@ -2,7 +2,7 @@
 .env
 .env.*
 !.env.example
-.garmin_tokens.json
+.garmin_token*.json
 
 # Python
 __pycache__/

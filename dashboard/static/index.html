@@ -58,6 +58,7 @@
     border: 0; background: none; color: var(--ink-2); padding: 6px 10px; font: inherit; cursor: pointer;
   }
   .seg button + button { border-left: 1px solid var(--border); }
+  @media (max-width: 520px) { .seg button { padding: 6px 7px; } }
   .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); font-weight: 600; }
   select.athlete {
     font: inherit; font-weight: 600; padding: 5px 28px 5px 10px; border: 1px solid var(--border); border-radius: 8px;
@@ -103,6 +104,22 @@
   .checks .flag .mark { background: var(--serious); }
   .checks .flag { color: var(--ink); font-weight: 600; }
   .checks .missing .mark { background: var(--axis); }
+  .info {
+    display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; margin-left: 6px;
+    padding: 0; border-radius: 50%; border: 1.5px solid var(--muted); background: none; color: var(--ink-2);
+    font: italic 700 11px/1 Georgia, serif; vertical-align: 2px; cursor: help;
+  }
+  .info:hover, .info:focus-visible, .info[aria-expanded="true"] { background: var(--ink); border-color: var(--ink); color: var(--surface); outline: none; }
+  .tip {
+    position: fixed; z-index: 1000; max-width: min(380px, calc(100vw - 16px)); padding: 12px 14px;
+    background: var(--surface); color: var(--ink-2); border: 1px solid var(--axis); border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.22); font-size: 13px; line-height: 1.5; font-weight: 400; pointer-events: none;
+  }
+  .tip h3 { margin: 0 0 6px; font-size: 13.5px; color: var(--ink); }
+  .tip p { margin: 0 0 8px; }
+  .tip p:last-child { margin-bottom: 0; }
+  .tip b { color: var(--ink); }
+  .tip ul { margin: 0 0 8px; padding-left: 18px; }
   .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
   .pill i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
@@ -163,7 +180,7 @@
   <section class="card">
     <div class="card-head">
       <div>
-        <h2>Training vs recovery</h2>
+        <h2 data-info="timeline">Training vs recovery</h2>
         <p class="sub">Daily training by sport, with recovery on the same dates. Recovery is logged on the morning you wake up, so a hard day shows up one point to the right.</p>
       </div>
       <div class="seg" id="metric">
@@ -185,13 +202,13 @@
 
   <div class="grid2">
     <section class="card">
-      <h2>Fitness &amp; fatigue</h2>
+      <h2 data-info="fitness">Fitness &amp; fatigue</h2>
       <p class="sub">42-day (fitness) and 7-day (fatigue) weighted averages of Garmin training load.</p>
       <div class="legend" id="ff-legend"></div>
       <div class="chart h-md"><canvas id="c-ff"></canvas></div>
     </section>
     <section class="card">
-      <h2>Form</h2>
+      <h2 data-info="form">Form</h2>
       <p class="sub">Fitness minus fatigue going into each day. Below zero = carrying fatigue.</p>
       <div class="chart h-md"><canvas id="c-form"></canvas></div>
     </section>
@@ -199,12 +216,12 @@
 
   <div class="grid2">
     <section class="card">
-      <h2>Acute:chronic workload ratio</h2>
+      <h2 data-info="acwr">Acute:chronic workload ratio</h2>
       <p class="sub">7-day vs 28-day average load. Shaded 0.8–1.3 is the usual sweet spot; above 1.5 is a fast ramp.</p>
       <div class="chart h-md"><canvas id="c-acwr"></canvas></div>
     </section>
     <section class="card">
-      <h2>Weekly volume</h2>
+      <h2 data-info="weekly">Weekly volume</h2>
       <p class="sub" id="weekly-sub">Per week (Mon–Sun) by sport. Partial weeks at the range edges only count days in range.</p>
       <div class="chart h-md"><canvas id="c-weekly"></canvas></div>
     </section>
@@ -213,7 +230,7 @@
   <section class="card">
     <div class="card-head">
       <div>
-        <h2>Intensity distribution</h2>
+        <h2 data-info="zones">Intensity distribution</h2>
         <p class="sub" id="zones-sub">Time in heart-rate zones for activities in the range.</p>
       </div>
       <div class="legend" id="zone-legend"></div>
@@ -222,7 +239,7 @@
   </section>
 
   <section class="card">
-    <h2>Next-day response</h2>
+    <h2 data-info="nextday">Next-day response</h2>
     <p class="sub" id="nd-sub"></p>
     <div class="grid4" id="nd-charts">
       <div><p class="rec-label">HRV vs range average (ms)</p><div class="chart h-sm"><canvas id="c-nd-hrv"></canvas></div></div>
@@ -238,11 +255,12 @@
   </section>
 
   <section class="card">
-    <h2>Activities</h2>
+    <h2 data-info="activities">Activities</h2>
     <p class="sub" id="act-sub"></p>
     <div class="scroll"><table id="act-table"></table></div>
   </section>
 </main>
+<div id="tip" class="tip" role="tooltip" hidden></div>
 
 <script>
 const SPORT_VARS = { Swim: "--s1", Bike: "--s2", Run: "--s3", Strength: "--s4", Other: "--s5" };
@@ -383,6 +401,88 @@ function renderKpis() {
     `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div>${foot}</div>`).join("");
 }
 
+// ---------- panel explanations (ⓘ tooltips) ----------
+const INFO = {
+  today: ["Today: readiness", `
+    <p><b>What it shows:</b> this morning's recovery markers (HRV, resting HR, sleep) and the load you carry into today (form, ACWR). Each marker that is off counts as a warning sign.</p>
+    <p><b>How to use it:</b> decide today's session before you start. <b>Good to go</b>: do the planned key workout. <b>Keep it moderate</b>: train as planned but cap the intensity or shorten the hard part. <b>Easy day or rest</b>: swap a hard session for easy aerobic work or rest, then move the key session a day or two.</p>
+    <p>One bad morning is noise; several in a row is a signal. Trust trends over a single reading.</p>`],
+  timeline: ["Training vs recovery", `
+    <p><b>What it shows:</b> daily training (load or hours, by sport) above the recovery markers on the same dates. Recovery is logged on the morning you wake up, so the effect of a hard day appears one point to the right.</p>
+    <p><b>How to use it:</b> after a hard day, a dip in HRV and a rise in resting HR are normal. They should bounce back within 1–2 days. If HRV stays below the shaded baseline and resting HR stays high for 3+ days, you're not absorbing the training: add an easy day before the next key session.</p>
+    <p>Schedule your hardest sessions for mornings when HRV is inside the baseline band and sleep was good.</p>`],
+  fitness: ["Fitness & fatigue", `
+    <p><b>What it shows:</b> <b>fitness</b> (42-day weighted average of daily training load) is the training you're adapted to; <b>fatigue</b> (7-day average) is how much you've done lately.</p>
+    <p><b>How to use it:</b> in a build, fitness should climb steadily; a sudden jump means you ramped too fast. Fatigue above fitness means you're loading: fine during a block, but it should come back down in recovery weeks.</p>
+    <p>For a race, build fitness over months, then taper so fatigue drops while fitness holds.</p>`],
+  form: ["Form", `
+    <p><b>What it shows:</b> fitness minus fatigue going into each day, i.e. how fresh you are.</p>
+    <p><b>How to use it</b> (as a share of fitness):</p>
+    <ul>
+      <li><b>−10% to −30%</b>: productive training, the normal zone in a build.</li>
+      <li><b>Below −30%</b>: high fatigue; plan a recovery week soon to avoid overreaching.</li>
+      <li><b>−10% to +5%</b>: maintaining or recovering.</li>
+      <li><b>+5% and above</b>: fresh. Aim to arrive at key races here after a taper; staying very fresh for weeks means fitness is slipping.</li>
+    </ul>`],
+  acwr: ["Acute:chronic workload ratio", `
+    <p><b>What it shows:</b> your last 7 days of load compared with your last 28 days.</p>
+    <p><b>How to use it:</b> it flags how fast you're ramping. <b>0.8–1.3</b> is a sustainable range. <b>Above 1.5</b> means this week is much harder than you're used to, a pattern linked to higher injury and illness risk. <b>Below 0.8</b> is a recovery week, taper or detraining.</p>
+    <p>Spikes often come after time off: when returning from a break or illness, rebuild over a few weeks instead of jumping back to old volume.</p>`],
+  weekly: ["Weekly volume", `
+    <p><b>What it shows:</b> load or hours per week (Mon–Sun), stacked by sport.</p>
+    <p><b>How to use it:</b> check your block structure. A common pattern is 2–3 progressively harder weeks followed by a recovery week roughly 30–50% lighter. Grow total volume gradually (about 5–10% per week).</p>
+    <p>Also check the sport mix against your goal race: for a triathlon, are swim, bike and run each getting enough consistent time?</p>`],
+  zones: ["Intensity distribution", `
+    <p><b>What it shows:</b> time spent in heart-rate zones 1–5 for the activities in the range, per sport and overall.</p>
+    <p><b>How to use it:</b> endurance performance is built mostly on easy volume plus a small amount of genuinely hard work. A common target is roughly <b>75–80% easy (Z1–2)</b> with most of the rest in <b>Z4–5</b>. Lots of <b>Z3</b> (the "grey zone") adds fatigue without the best gains from either easy or hard training.</p>
+    <p>If your easy share falls below about 70% over a block, your easy days are probably too hard. Slow them down so the hard days can be truly hard.</p>
+    <p>Heart rate lags during short intervals and is less reliable for swimming and strength, so read those sports loosely.</p>`],
+  nextday: ["Next-day response", `
+    <p><b>What it shows:</b> how your next-morning HRV, resting HR and sleep compare with your average after rest, easy and hard days (hard = your top 25% of training days by load).</p>
+    <p><b>How to use it:</b> this is your personal cost of a hard day. A large hit (HRV well down, resting HR up, worse sleep) means you need an easy day after hard ones, and that sleep and fueling after key sessions matter.</p>
+    <p>Compare training blocks: as fitness improves, the same hard day should cost you less. Use 90 days or more for reliable averages; short ranges have few days per group.</p>`],
+  activities: ["Activities", `
+    <p><b>What it shows:</b> every activity in the range with time, distance, Garmin training load, aerobic training effect (TE) and average heart rate.</p>
+    <p><b>How to use it:</b> check that sessions did what they were meant to. Aerobic TE (Garmin's 0–5 scale): <b>below 2</b> is recovery, <b>2–2.9</b> maintains, <b>3–3.9</b> improves, <b>4–4.9</b> highly improves, <b>5</b> is overreaching.</p>
+    <p>Easy days should stay below about 3. Key workouts should reach 3.5 or more. If every session lands around 3, your intensity isn't varied enough.</p>`],
+};
+
+const infoButton = key => `<button type="button" class="info" data-info-key="${key}" aria-label="About ${INFO[key][0]}" aria-expanded="false">i</button>`;
+
+function showTip(btn) {
+  const tip = $("tip"), [title, body] = INFO[btn.dataset.infoKey];
+  tip.innerHTML = `<h3>${title}</h3>${body}`;
+  tip.hidden = false;
+  const r = btn.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+  const left = Math.min(Math.max(8, r.left - 12), innerWidth - w - 8);
+  const below = r.bottom + 8 + h <= innerHeight || r.top - 8 - h < 0;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${below ? r.bottom + 8 : r.top - 8 - h}px`;
+  document.querySelectorAll(".info[aria-expanded=true]").forEach(b => b.setAttribute("aria-expanded", "false"));
+  btn.setAttribute("aria-expanded", "true");
+  btn.setAttribute("aria-describedby", "tip");
+}
+
+function hideTip() {
+  $("tip").hidden = true;
+  document.querySelectorAll(".info[aria-expanded=true]").forEach(b => { b.setAttribute("aria-expanded", "false"); b.removeAttribute("aria-describedby"); });
+}
+
+function initInfo() {
+  document.querySelectorAll("h2[data-info]").forEach(h => h.insertAdjacentHTML("beforeend", infoButton(h.dataset.info)));
+  // Hover, keyboard focus and taps show the tip; moving away, tapping elsewhere, Esc or scrolling hide it.
+  document.addEventListener("mouseover", e => { const b = e.target.closest(".info"); if (b) showTip(b); });
+  document.addEventListener("mouseout", e => { if (e.target.closest(".info") && !e.relatedTarget?.closest?.(".info")) hideTip(); });
+  document.addEventListener("focusin", e => { const b = e.target.closest(".info"); if (b) showTip(b); });
+  document.addEventListener("focusout", e => { if (e.target.closest(".info")) hideTip(); });
+  document.addEventListener("click", e => {
+    const b = e.target.closest(".info");
+    b ? showTip(b) : hideTip();
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") hideTip(); });
+  addEventListener("scroll", hideTip, { passive: true });
+}
+
 // ---------- today / readiness ----------
 const CUE_VARS = { go: ["--good", "✓"], moderate: ["--warning", "!"], easy: ["--serious", "↓"], none: ["--muted", "?"] };
 const CHECK_MARKS = { ok: "✓", flag: "!", missing: "–" };
@@ -400,7 +500,7 @@ function renderToday() {
 
   $("today").innerHTML = `
     <div class="cue" style="--cue:${css(cueVar)}">
-      <div class="eyebrow">${when}</div>
+      <div class="eyebrow">${when}${infoButton("today")}</div>
       <div class="label"><span class="icon" aria-hidden="true">${cueIcon}</span>${t.cue.label}</div>
       <p>${t.cue.text}</p>
     </div>
@@ -697,6 +797,7 @@ function syncPresetButtons() {
 
 function init() {
   loadSaved();
+  initInfo();
   const today = new Date(), monthAgo = new Date(); monthAgo.setDate(today.getDate() - 27);
   $("start").value = range.start || localISO(monthAgo);
   $("end").value = range.end || localISO(today);

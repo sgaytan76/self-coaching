@@ -1,5 +1,7 @@
 """OAuth2 Authorization Code + PKCE flow and token storage for Garmin."""
 
+from __future__ import annotations
+
 import base64
 import hashlib
 import json

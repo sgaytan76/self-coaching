@@ -1,5 +1,7 @@
 """Thin wrapper over the Garmin Health / Activity REST API."""
 
+from __future__ import annotations
+
 import time
 
 import requests

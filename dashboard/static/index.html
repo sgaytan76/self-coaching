@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Training Load</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --band: rgba(137,135,129,0.16);
+    --good: #0ca30c; --good-text: #006300; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4;
+    --z1: #86b6ef; --z2: #5598e7; --z3: #2a78d6; --z4: #1c5cab; --z5: #104281;
+    --neg: #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --band: rgba(195,194,183,0.14);
+      --good-text: #0ca30c;
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+      --z1: #184f95; --z2: #1c5cab; --z3: #2a78d6; --z4: #5598e7; --z5: #9ec5f4;
+      --neg: #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10); --band: rgba(195,194,183,0.14);
+    --good-text: #0ca30c;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181;
+    --z1: #184f95; --z2: #1c5cab; --z3: #2a78d6; --z4: #5598e7; --z5: #9ec5f4;
+    --neg: #e66767;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  h2 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
+  .sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 10px; }
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+  .seg button {
+    border: 0; background: none; color: var(--ink-2); padding: 6px 10px; font: inherit; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); font-weight: 600; }
+  input[type=date] {
+    font: inherit; padding: 5px 6px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--ink);
+  }
+  .btn {
+    font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  .btn:disabled { opacity: .55; cursor: progress; }
+  .status { color: var(--muted); font-size: 12px; }
+  .status.err { color: var(--critical); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+  .tile .label { color: var(--ink-2); font-size: 12px; }
+  .tile .value { font-size: 22px; font-weight: 650; margin: 2px 0; }
+  .tile .value small { font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .tile .delta { font-size: 12px; color: var(--muted); }
+  .delta .up-good, .delta .down-good { color: var(--good-text); font-weight: 600; }
+  .delta .up-bad, .delta .down-bad { color: var(--critical); font-weight: 600; }
+  .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  .card-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-start; justify-content: space-between; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 14px; }
+  .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; }
+  .grid2 > .card, .grid4 > div { margin-bottom: 0; min-width: 0; }
+  .grid2 { margin-bottom: 14px; }
+  @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
+  .chart { position: relative; width: 100%; }
+  .h-train { height: 230px; } .h-rec { height: 120px; } .h-md { height: 220px; } .h-sm { height: 160px; }
+  .rec-label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 10px 0 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--ink-2); font-weight: 600; font-size: 12px; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+  .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .hidden { display: none !important; }
+  .loading { opacity: .5; transition: opacity .2s; }
+</style>
+</head>
+<body>
+<main id="app">
+  <header>
+    <h1>Training Load</h1>
+    <span class="status" id="status">Loading…</span>
+    <div class="filters" role="group" aria-label="Date range">
+      <div class="seg" id="presets">
+        <button data-days="7">7d</button>
+        <button data-days="28">28d</button>
+        <button data-days="90">90d</button>
+        <button data-days="182">6m</button>
+        <button data-days="365">1y</button>
+        <button data-days="custom">Custom</button>
+      </div>
+      <span id="custom" class="hidden">
+        <input type="date" id="start" aria-label="Start date"> –
+        <input type="date" id="end" aria-label="End date">
+      </span>
+      <button class="btn" id="sync">Sync</button>
+    </div>
+  </header>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Training vs recovery</h2>
+        <p class="sub">Daily training by sport, with recovery on the same dates. Recovery is logged on the morning you wake up, so a hard day shows up one point to the right.</p>
+      </div>
+      <div class="seg" id="metric">
+        <button data-metric="load" aria-pressed="true">Load</button>
+        <button data-metric="hours">Hours</button>
+      </div>
+    </div>
+    <div class="legend" id="sport-legend"></div>
+    <div class="chart h-train"><canvas id="c-train"></canvas></div>
+    <p class="rec-label">HRV (ms) · shaded band = your balanced baseline</p>
+    <div class="chart h-rec"><canvas id="c-hrv"></canvas></div>
+    <p class="rec-label">Resting heart rate (bpm)</p>
+    <div class="chart h-rec"><canvas id="c-rhr"></canvas></div>
+    <p class="rec-label">Sleep (hours)</p>
+    <div class="chart h-rec"><canvas id="c-sleep"></canvas></div>
+    <p class="rec-label">Sleep score</p>
+    <div class="chart h-rec"><canvas id="c-score"></canvas></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Fitness &amp; fatigue</h2>
+      <p class="sub">42-day (fitness) and 7-day (fatigue) weighted averages of Garmin training load.</p>
+      <div class="legend" id="ff-legend"></div>
+      <div class="chart h-md"><canvas id="c-ff"></canvas></div>
+    </section>
+    <section class="card">
+      <h2>Form</h2>
+      <p class="sub">Fitness minus fatigue going into each day. Below zero = carrying fatigue.</p>
+      <div class="chart h-md"><canvas id="c-form"></canvas></div>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Acute:chronic workload ratio</h2>
+      <p class="sub">7-day vs 28-day average load. Shaded 0.8–1.3 is the usual sweet spot; above 1.5 is a fast ramp.</p>
+      <div class="chart h-md"><canvas id="c-acwr"></canvas></div>
+    </section>
+    <section class="card">
+      <h2>Weekly volume</h2>
+      <p class="sub" id="weekly-sub">Per week (Mon–Sun) by sport. Partial weeks at the range edges only count days in range.</p>
+      <div class="chart h-md"><canvas id="c-weekly"></canvas></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Intensity distribution</h2>
+        <p class="sub" id="zones-sub">Time in heart-rate zones for activities in the range.</p>
+      </div>
+      <div class="legend" id="zone-legend"></div>
+    </div>
+    <div class="chart h-md"><canvas id="c-zones"></canvas></div>
+  </section>
+
+  <section class="card">
+    <h2>Next-day response</h2>
+    <p class="sub" id="nd-sub"></p>
+    <div class="grid4" id="nd-charts">
+      <div><p class="rec-label">HRV vs range average (ms)</p><div class="chart h-sm"><canvas id="c-nd-hrv"></canvas></div></div>
+      <div><p class="rec-label">Resting HR vs average (bpm)</p><div class="chart h-sm"><canvas id="c-nd-rhr"></canvas></div></div>
+      <div><p class="rec-label">Sleep score vs average</p><div class="chart h-sm"><canvas id="c-nd-score"></canvas></div></div>
+      <div><p class="rec-label">Sleep vs average (h)</p><div class="chart h-sm"><canvas id="c-nd-sleep"></canvas></div></div>
+    </div>
+    <div class="scroll" style="margin-top:12px">
+      <table id="nd-table"></table>
+    </div>
+    <p class="rec-label" style="margin-top:16px">Day's load vs next-morning HRV</p>
+    <div class="chart h-md"><canvas id="c-scatter"></canvas></div>
+  </section>
+
+  <section class="card">
+    <h2>Activities</h2>
+    <p class="sub" id="act-sub"></p>
+    <div class="scroll"><table id="act-table"></table></div>
+  </section>
+</main>
+
+<script>
+const SPORT_VARS = { Swim: "--s1", Bike: "--s2", Run: "--s3", Strength: "--s4", Other: "--s5" };
+const DAYTYPE_VARS = { rest: "--s1", easy: "--s3", hard: "--s2" };
+const ZONE_VARS = ["--z1", "--z2", "--z3", "--z4", "--z5"];
+const charts = {};
+let data = null;
+let metric = "load";
+let range = { days: 28 };
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const $ = id => document.getElementById(id);
+const iso = d => d.toISOString().slice(0, 10);
+const fmt = (v, digits = 0) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+const shortDate = s => new Date(s + "T00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const hm = h => h == null ? "–" : `${Math.floor(h)}h ${String(Math.round((h % 1) * 60)).padStart(2, "0")}m`;
+// Statute units (from the Garmin profile): swims in yards, everything else in miles.
+const distance = (m, sport) => !m ? "–" : sport === "Swim" ? `${fmt(m / 0.9144)} yd` : `${fmt(m / 1609.344, 2)} mi`;
+
+function localISO(d) { const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return iso(z); }
+
+function currentRange() {
+  if (range.days === "custom") return { start: $("start").value, end: $("end").value };
+  const end = new Date();
+  const start = new Date(); start.setDate(end.getDate() - (range.days - 1));
+  return { start: localISO(start), end: localISO(end) };
+}
+
+function saveRange() { try { localStorage.setItem("tl-range", JSON.stringify(range)); localStorage.setItem("tl-metric", metric); } catch (e) {} }
+function loadSaved() {
+  try {
+    const r = JSON.parse(localStorage.getItem("tl-range") || "null");
+    if (r) range = r;
+    metric = localStorage.getItem("tl-metric") || metric;
+  } catch (e) {}
+}
+
+// ---------- shared chart styling ----------
+function baseOptions(extra = {}) {
+  const grid = css("--grid"), muted = css("--muted");
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: css("--surface"), titleColor: css("--ink"), bodyColor: css("--ink-2"),
+        borderColor: css("--axis"), borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
+      },
+    },
+    scales: {
+      x: { grid: { display: false }, border: { color: css("--axis") },
+           ticks: { color: muted, maxRotation: 0, autoSkipPadding: 12, font: { size: 11 } } },
+      y: { grid: { color: grid }, border: { display: false },
+           ticks: { color: muted, font: { size: 11 }, maxTicksLimit: 4 } },
+    },
+    ...extra,
+  };
+}
+
+function draw(id, config) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart($(id), config);
+}
+
+function legend(el, items) {
+  $(el).innerHTML = items.map(([label, color]) => `<span><i style="background:${color}"></i>${label}</span>`).join("");
+}
+
+function lineDataset(label, values, color, extra = {}) {
+  return { type: "line", label, data: values, borderColor: color, backgroundColor: color, borderWidth: 2,
+           pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: css("--surface"),
+           spanGaps: true, tension: 0.25, ...extra };
+}
+
+// ---------- KPI tiles ----------
+function deltaHtml(cur, prev, goodWhen, digits = 1, unit = "") {
+  if (cur == null || prev == null) return `<span class="delta">no previous data</span>`;
+  const d = cur - prev;
+  if (Math.abs(d) < Math.pow(10, -digits) / 2) return `<span class="delta">same as previous period</span>`;
+  const arrow = d > 0 ? "▲" : "▼";
+  let cls = "";
+  if (goodWhen === "up") cls = d > 0 ? "up-good" : "down-bad";
+  if (goodWhen === "down") cls = d < 0 ? "down-good" : "up-bad";
+  return `<span class="delta"><span class="${cls}">${arrow} ${fmt(Math.abs(d), digits)}${unit}</span> vs previous ${data.range.days}d</span>`;
+}
+
+function formStatus(form, ctl) {
+  if (form == null || !ctl) return null;
+  const pct = form / ctl;
+  if (pct < -0.3) return ["High fatigue", "--serious"];
+  if (pct < -0.1) return ["Productive", "--good"];
+  if (pct <= 0.05) return ["Maintaining", "--muted"];
+  return ["Fresh", "--s1"];
+}
+
+function acwrStatus(v) {
+  if (v == null) return null;
+  if (v > 1.5) return ["Ramping fast", "--critical"];
+  if (v > 1.3) return ["Elevated", "--warning"];
+  if (v >= 0.8) return ["Sweet spot", "--good"];
+  return ["Detraining", "--muted"];
+}
+
+function pill(status) {
+  if (!status) return "";
+  return `<span class="pill"><i style="background:${css(status[1])}"></i>${status[0]}</span>`;
+}
+
+function renderKpis() {
+  const c = data.kpis.current, p = data.kpis.previous;
+  const tiles = [
+    ["Training time", hm(c.hours), deltaHtml(c.hours, p.hours, null, 1, "h")],
+    ["Training load", fmt(c.load), deltaHtml(c.load, p.load, null, 0)],
+    ["Sessions", fmt(c.sessions), deltaHtml(c.sessions, p.sessions, null, 0)],
+    ["Fitness (end of range)", fmt(c.ctl), `<span class="delta">Fatigue ${fmt(c.atl)}</span>`],
+    ["Form", `${c.form > 0 ? "+" : ""}${fmt(c.form)}`, pill(formStatus(c.form, c.ctl))],
+    ["ACWR", fmt(c.acwr, 2), pill(acwrStatus(c.acwr))],
+    ["Avg sleep", hm(c.sleep_h), deltaHtml(c.sleep_h, p.sleep_h, "up", 1, "h")],
+    ["Avg sleep score", fmt(c.sleep_score), deltaHtml(c.sleep_score, p.sleep_score, "up", 1)],
+    ["Avg HRV", `${fmt(c.hrv)} <small>ms</small>`, deltaHtml(c.hrv, p.hrv, "up", 1, " ms")],
+    ["Avg resting HR", `${fmt(c.rhr)} <small>bpm</small>`, deltaHtml(c.rhr, p.rhr, "down", 1, " bpm")],
+  ];
+  $("kpis").innerHTML = tiles.map(([label, value, foot]) =>
+    `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div>${foot}</div>`).join("");
+}
+
+// ---------- training vs recovery ----------
+function renderTimeline() {
+  const s = data.series, labels = s.map(d => shortDate(d.date));
+  const unit = metric === "load" ? "load" : "h";
+  legend("sport-legend", data.sports.map(sp => [sp, css(SPORT_VARS[sp])]));
+
+  draw("c-train", {
+    type: "bar",
+    data: {
+      labels,
+      datasets: data.sports.map(sp => ({
+        label: sp, data: s.map(d => d.sports[sp][metric] || null),
+        backgroundColor: css(SPORT_VARS[sp]), borderColor: css("--surface"), borderWidth: { top: 2 },
+        borderSkipped: "bottom", borderRadius: 4, maxBarThickness: 28, stack: "t",
+      })),
+    },
+    options: baseOptions({
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          ...baseOptions().plugins.tooltip,
+          filter: item => item.raw != null,
+          callbacks: {
+            title: items => {
+              const d = s[items[0].dataIndex];
+              return `${shortDate(d.date)} · ${metric === "load" ? fmt(d.load) + " load" : hm(d.hours)} · ${d.day_type}`;
+            },
+            label: item => `${item.dataset.label}: ${metric === "load" ? fmt(item.raw) : hm(item.raw)}`,
+            afterBody: items => s[items[0].dataIndex].activities.map(a => `• ${a.name} (${hm(a.hours)}, ${fmt(a.load)} load)`),
+          },
+        },
+      },
+      scales: { ...baseOptions().scales,
+        x: { ...baseOptions().scales.x, stacked: true },
+        y: { ...baseOptions().scales.y, stacked: true, title: { display: true, text: unit, color: css("--muted") } } },
+    }),
+  });
+
+  const recovery = (id, key, color, label, digits, extraDatasets = []) => draw(id, {
+    type: "line",
+    data: { labels, datasets: [...extraDatasets, lineDataset(label, s.map(d => d[key]), color, { pointRadius: s.length <= 31 ? 2 : 0 })] },
+    options: baseOptions({
+      plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip,
+        filter: item => item.dataset.label === label,
+        callbacks: { label: item => `${label}: ${fmt(item.raw, digits)}` } } },
+      scales: { ...baseOptions().scales, y: { ...baseOptions().scales.y, grace: "10%" } },
+    }),
+  });
+
+  const band = css("--band");
+  recovery("c-hrv", "hrv", css("--s1"), "HRV", 0, [
+    { type: "line", label: "baseline high", data: s.map(d => d.hrv_high), borderWidth: 0, pointRadius: 0, fill: "+1", backgroundColor: band, spanGaps: true },
+    { type: "line", label: "baseline low", data: s.map(d => d.hrv_low), borderWidth: 0, pointRadius: 0, spanGaps: true },
+  ]);
+  recovery("c-rhr", "rhr", css("--s1"), "Resting HR", 0);
+  recovery("c-sleep", "sleep_h", css("--s1"), "Sleep (h)", 1);
+  recovery("c-score", "sleep_score", css("--s1"), "Sleep score", 0);
+}
+
+// ---------- load model ----------
+function renderLoadModel() {
+  const s = data.series, labels = s.map(d => shortDate(d.date));
+  const fit = css("--s1"), fat = css("--s2");
+  legend("ff-legend", [["Fitness (42d)", fit], ["Fatigue (7d)", fat]]);
+  draw("c-ff", {
+    type: "line",
+    data: { labels, datasets: [lineDataset("Fitness", s.map(d => d.ctl), fit), lineDataset("Fatigue", s.map(d => d.atl), fat)] },
+    options: baseOptions(),
+  });
+
+  draw("c-form", {
+    type: "bar",
+    data: { labels, datasets: [{ label: "Form", data: s.map(d => d.form),
+      backgroundColor: s.map(d => d.form >= 0 ? css("--s1") : css("--neg")), borderRadius: 3, maxBarThickness: 18 }] },
+    options: baseOptions({ plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip,
+      callbacks: { label: item => { const d = s[item.dataIndex]; const st = formStatus(d.form, d.ctl);
+        return `Form ${fmt(d.form)}${st ? " · " + st[0] : ""}`; } } } } }),
+  });
+
+  const sweet = css("--band");
+  draw("c-acwr", {
+    type: "line",
+    data: { labels, datasets: [
+      { label: "upper", data: s.map(() => 1.3), borderWidth: 0, pointRadius: 0, fill: "+1", backgroundColor: sweet },
+      { label: "lower", data: s.map(() => 0.8), borderWidth: 0, pointRadius: 0 },
+      { label: "1.5", data: s.map(() => 1.5), borderColor: css("--critical"), borderWidth: 1, borderDash: [4, 4], pointRadius: 0 },
+      lineDataset("ACWR", s.map(d => d.acwr), css("--s1")),
+    ] },
+    options: baseOptions({
+      plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip,
+        filter: item => item.dataset.label === "ACWR",
+        callbacks: { label: item => { const st = acwrStatus(item.raw); return `ACWR ${fmt(item.raw, 2)}${st ? " · " + st[0] : ""}`; } } } },
+      scales: { ...baseOptions().scales, y: { ...baseOptions().scales.y, suggestedMin: 0.5, suggestedMax: 1.7 } },
+    }),
+  });
+}
+
+// ---------- weekly ----------
+function renderWeekly() {
+  const w = data.weekly;
+  $("weekly-sub").textContent = `${metric === "load" ? "Training load" : "Hours"} per week (Mon–Sun) by sport. Partial weeks at the range edges only count days in range.`;
+  draw("c-weekly", {
+    type: "bar",
+    data: { labels: w.map(x => "Wk " + shortDate(x.week)),
+      datasets: data.sports.map(sp => ({ label: sp, data: w.map(x => x.sports[sp][metric] || null),
+        backgroundColor: css(SPORT_VARS[sp]), borderColor: css("--surface"), borderWidth: { top: 2 },
+        borderSkipped: "bottom", borderRadius: 4, maxBarThickness: 40, stack: "w" })) },
+    options: baseOptions({
+      plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip, filter: i => i.raw != null,
+        callbacks: { label: i => `${i.dataset.label}: ${metric === "load" ? fmt(i.raw) : hm(i.raw)}`,
+                     footer: items => { const x = w[items[0].dataIndex]; return `Total: ${metric === "load" ? fmt(x.load) : hm(x.hours)}`; } } } },
+      scales: { ...baseOptions().scales, x: { ...baseOptions().scales.x, stacked: true }, y: { ...baseOptions().scales.y, stacked: true } },
+    }),
+  });
+}
+
+// ---------- zones ----------
+function renderZones() {
+  const z = data.zones, total = z.total.reduce((a, b) => a + b, 0);
+  const pct = i => total ? Math.round(z.total[i] / total * 100) : 0;
+  const easy = pct(0) + pct(1), hard = pct(3) + pct(4);
+  $("zones-sub").textContent = total
+    ? `${hm(total)} with heart rate in the range: ${easy}% easy (Z1–2), ${pct(2)}% moderate (Z3), ${hard}% hard (Z4–5).`
+    : "No heart-rate zone data in this range.";
+  const zoneColors = ZONE_VARS.map(css);
+  legend("zone-legend", zoneColors.map((c, i) => [`Z${i + 1}`, c]));
+  const rows = [...data.sports.filter(sp => z.by_sport[sp].some(v => v > 0)), "All"];
+  draw("c-zones", {
+    type: "bar",
+    data: { labels: rows, datasets: ZONE_VARS.map((_, i) => ({
+      label: `Z${i + 1}`, data: rows.map(sp => sp === "All" ? z.total[i] : z.by_sport[sp][i]),
+      backgroundColor: zoneColors[i], borderColor: css("--surface"), borderWidth: { right: 2 }, borderSkipped: false,
+      borderRadius: 3, maxBarThickness: 26, stack: "z" })) },
+    options: baseOptions({
+      indexAxis: "y",
+      interaction: { mode: "index", intersect: false, axis: "y" },
+      plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip,
+        callbacks: { label: i => { const sum = i.chart.data.datasets.reduce((a, d) => a + (d.data[i.dataIndex] || 0), 0);
+          return `${i.dataset.label}: ${hm(i.raw)} (${sum ? Math.round(i.raw / sum * 100) : 0}%)`; } } } },
+      scales: { x: { ...baseOptions().scales.y, stacked: true, title: { display: true, text: "hours", color: css("--muted") } },
+                y: { ...baseOptions().scales.x, stacked: true, ticks: { ...baseOptions().scales.x.ticks, color: css("--ink-2") } } },
+    }),
+  });
+}
+
+// ---------- next-day response ----------
+function renderNextDay() {
+  const nd = data.next_day, groups = ["rest", "easy", "hard"];
+  const g = nd.groups;
+  $("nd-sub").textContent = `Each day is classed as rest (no training), easy, or hard (load ≥ ${fmt(nd.hard_threshold)}, your top 25% of training days since 2024). ` +
+    `Bars show how the following night and morning compare with the range average.`;
+  const mini = (id, key, digits) => draw(id, {
+    type: "bar",
+    data: { labels: groups.map(x => `${x[0].toUpperCase() + x.slice(1)} (${g[x].days})`),
+      datasets: [{ data: groups.map(x => g[x].delta[key]), backgroundColor: groups.map(x => css(DAYTYPE_VARS[x])),
+                   borderRadius: 4, maxBarThickness: 36 }] },
+    options: baseOptions({
+      interaction: { mode: "nearest", intersect: true },
+      plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip,
+        callbacks: { label: i => { const x = groups[i.dataIndex];
+          return `avg ${fmt(g[x][key], digits)} (${i.raw > 0 ? "+" : ""}${fmt(i.raw, digits)} vs ${fmt(nd.overall[key], digits)})`; } } } },
+      scales: { ...baseOptions().scales, y: { ...baseOptions().scales.y, grace: "15%" } },
+    }),
+  });
+  mini("c-nd-hrv", "hrv", 1);
+  mini("c-nd-rhr", "rhr", 1);
+  mini("c-nd-score", "sleep_score", 1);
+  mini("c-nd-sleep", "sleep_h", 2);
+
+  const row = (label, key, digits) => `<tr><td>${label}</td>${groups.map(x => `<td class="num">${fmt(g[x][key], digits)}</td>`).join("")}<td class="num">${fmt(nd.overall[key], digits)}</td></tr>`;
+  $("nd-table").innerHTML = `<thead><tr><th>Next morning</th>${groups.map(x => `<th class="num">After ${x} (${g[x].days}d)</th>`).join("")}<th class="num">Range avg</th></tr></thead>
+    <tbody>${row("HRV (ms)", "hrv", 1)}${row("Resting HR (bpm)", "rhr", 1)}${row("Sleep score", "sleep_score", 1)}${row("Sleep (h)", "sleep_h", 2)}</tbody>`;
+
+  const pts = nd.scatter.filter(p => p.hrv != null);
+  draw("c-scatter", {
+    type: "scatter",
+    data: { datasets: [{ label: "Days", data: pts.map(p => ({ x: p.load, y: p.hrv, date: p.date })),
+      backgroundColor: css("--s1"), borderColor: css("--surface"), borderWidth: 1.5, pointRadius: 5, pointHoverRadius: 7 }] },
+    options: baseOptions({
+      interaction: { mode: "nearest", intersect: true },
+      plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip,
+        callbacks: { label: i => `${shortDate(i.raw.date)}: load ${fmt(i.raw.x)} → next HRV ${fmt(i.raw.y)} ms` } } },
+      scales: { x: { ...baseOptions().scales.y, type: "linear", title: { display: true, text: "day's training load", color: css("--muted") } },
+                y: { ...baseOptions().scales.y, title: { display: true, text: "next-morning HRV (ms)", color: css("--muted") }, grace: "5%" } },
+    }),
+  });
+}
+
+// ---------- activities ----------
+function renderActivities() {
+  const acts = data.activities;
+  $("act-sub").textContent = `${acts.length} activities in range, newest first.`;
+  $("act-table").innerHTML = `<thead><tr><th>Date</th><th>Activity</th><th>Sport</th><th class="num">Time</th><th class="num">Distance</th>
+    <th class="num">Load</th><th class="num">Aerobic TE</th><th class="num">Avg HR</th></tr></thead><tbody>` +
+    acts.map(a => `<tr><td>${shortDate(a.date)}</td><td>${(a.name || "").replace(/</g, "&lt;")}</td>
+      <td><span class="pill"><i style="background:${css(SPORT_VARS[a.sport])}"></i>${a.sport}</span></td>
+      <td class="num">${hm((a.duration_s || 0) / 3600)}</td>
+      <td class="num">${distance(a.distance_m, a.sport)}</td>
+      <td class="num">${fmt(a.load)}</td><td class="num">${fmt(a.aerobic_te, 1)}</td><td class="num">${fmt(a.avg_hr)}</td></tr>`).join("") +
+    `</tbody>`;
+}
+
+// ---------- data flow ----------
+function renderAll() {
+  if (!data) return;
+  renderKpis(); renderTimeline(); renderLoadModel(); renderWeekly(); renderZones(); renderNextDay(); renderActivities();
+}
+
+function setStatus(text, err = false) { $("status").textContent = text; $("status").classList.toggle("err", err); }
+
+function statusText(st) {
+  if (st.error) return [`Sync failed: ${st.error}`, true];
+  if (!st.last_sync_at) return ["Never synced", false];
+  return [`Synced ${new Date(st.last_sync_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`, false];
+}
+
+async function load() {
+  const r = currentRange();
+  if (!r.start || !r.end) return;
+  $("app").classList.add("loading");
+  try {
+    const res = await fetch(`/api/data?start=${r.start}&end=${r.end}`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    data = body;
+    renderAll();
+    setStatus(...statusText(data.status));
+  } catch (e) {
+    setStatus(`Could not load data: ${e.message}`, true);
+  } finally {
+    $("app").classList.remove("loading");
+  }
+}
+
+async function sync() {
+  $("sync").disabled = true; setStatus("Syncing with Garmin…");
+  try {
+    const res = await fetch("/api/sync", { method: "POST" });
+    const body = await res.json();
+    if (!body.ok) throw new Error(body.error);
+    await load();
+  } catch (e) {
+    setStatus(`Sync failed: ${e.message}`, true);
+  } finally {
+    $("sync").disabled = false;
+  }
+}
+
+function syncPresetButtons() {
+  document.querySelectorAll("#presets button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.days == range.days)));
+  document.querySelectorAll("#metric button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.metric === metric)));
+  $("custom").classList.toggle("hidden", range.days !== "custom");
+}
+
+function init() {
+  loadSaved();
+  const today = new Date(), monthAgo = new Date(); monthAgo.setDate(today.getDate() - 27);
+  $("start").value = range.start || localISO(monthAgo);
+  $("end").value = range.end || localISO(today);
+  $("start").max = $("end").max = localISO(today);
+  syncPresetButtons();
+
+  $("presets").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    range = b.dataset.days === "custom" ? { days: "custom", start: $("start").value, end: $("end").value } : { days: Number(b.dataset.days) };
+    syncPresetButtons(); saveRange(); load();
+  });
+  ["start", "end"].forEach(id => $(id).addEventListener("change", () => {
+    if ($("start").value > $("end").value) return setStatus("Start date must be before end date", true);
+    range = { days: "custom", start: $("start").value, end: $("end").value }; saveRange(); load();
+  }));
+  $("metric").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    metric = b.dataset.metric; syncPresetButtons(); saveRange(); renderTimeline(); renderWeekly();
+  });
+  $("sync").addEventListener("click", sync);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+
+  load().then(() => { if (data && data.status.stale) sync(); });
+}
+
+init();
+</script>
+</body>
+</html>

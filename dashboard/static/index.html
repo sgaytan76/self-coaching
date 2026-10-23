@@ -59,6 +59,10 @@
   }
   .seg button + button { border-left: 1px solid var(--border); }
   .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); font-weight: 600; }
+  select.athlete {
+    font: inherit; font-weight: 600; padding: 5px 28px 5px 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--surface); color: var(--ink); max-width: 220px;
+  }
   input[type=date] {
     font: inherit; padding: 5px 6px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--surface); color: var(--ink);
@@ -128,6 +132,7 @@
 <main id="app">
   <header>
     <h1>Training Load</h1>
+    <select id="athlete" class="athlete" aria-label="Athlete"></select>
     <span class="status" id="status">Loading…</span>
     <div class="filters" role="group" aria-label="Date range">
       <div class="seg" id="presets">
@@ -247,6 +252,7 @@ const charts = {};
 let data = null;
 let metric = "load";
 let range = { days: 28 };
+let athlete = null;  // selected athlete id
 
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const $ = id => document.getElementById(id);
@@ -254,8 +260,13 @@ const iso = d => d.toISOString().slice(0, 10);
 const fmt = (v, digits = 0) => v == null ? "–" : Number(v).toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: digits });
 const shortDate = s => new Date(s + "T00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const hm = h => h == null ? "–" : `${Math.floor(h)}h ${String(Math.round((h % 1) * 60)).padStart(2, "0")}m`;
-// Statute units (from the Garmin profile): swims in yards, everything else in miles.
-const distance = (m, sport) => !m ? "–" : sport === "Swim" ? `${fmt(m / 0.9144)} yd` : `${fmt(m / 1609.344, 2)} mi`;
+// Units follow the athlete's Garmin profile: statute = yards/miles, metric = meters/km.
+function distance(m, sport) {
+  if (!m) return "–";
+  const statute = data.profile.measurement_system === "statute_us";
+  if (sport === "Swim") return statute ? `${fmt(m / 0.9144)} yd` : `${fmt(m)} m`;
+  return statute ? `${fmt(m / 1609.344, 2)} mi` : `${fmt(m / 1000, 2)} km`;
+}
 
 function localISO(d) { const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return iso(z); }
 
@@ -266,12 +277,19 @@ function currentRange() {
   return { start: localISO(start), end: localISO(end) };
 }
 
-function saveRange() { try { localStorage.setItem("tl-range", JSON.stringify(range)); localStorage.setItem("tl-metric", metric); } catch (e) {} }
+function saveRange() {
+  try {
+    localStorage.setItem("tl-range", JSON.stringify(range));
+    localStorage.setItem("tl-metric", metric);
+    if (athlete) localStorage.setItem("tl-athlete", athlete);
+  } catch (e) {}
+}
 function loadSaved() {
   try {
     const r = JSON.parse(localStorage.getItem("tl-range") || "null");
     if (r) range = r;
     metric = localStorage.getItem("tl-metric") || metric;
+    athlete = localStorage.getItem("tl-athlete");
   } catch (e) {}
 }
 
@@ -366,7 +384,7 @@ function renderKpis() {
 }
 
 // ---------- today / readiness ----------
-const CUE_VARS = { go: ["--good", "✓"], moderate: ["--warning", "!"], easy: ["--serious", "↓"] };
+const CUE_VARS = { go: ["--good", "✓"], moderate: ["--warning", "!"], easy: ["--serious", "↓"], none: ["--muted", "?"] };
 const CHECK_MARKS = { ok: "✓", flag: "!", missing: "–" };
 
 function renderToday() {
@@ -618,36 +636,57 @@ function statusText(st) {
   return [`Synced ${new Date(st.last_sync_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`, false];
 }
 
+let loadSeq = 0;
+
 async function load() {
   const r = currentRange();
-  if (!r.start || !r.end) return;
+  if (!r.start || !r.end || !athlete) return;
+  const seq = ++loadSeq;
   $("app").classList.add("loading");
   try {
-    const res = await fetch(`/api/data?start=${r.start}&end=${r.end}`);
+    const q = new URLSearchParams({ athlete, start: r.start, end: r.end });
+    const res = await fetch(`/api/data?${q}`);
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || res.statusText);
+    if (seq !== loadSeq) return;  // a newer request (other athlete or range) has started
     data = body;
     renderAll();
     setStatus(...statusText(data.status));
   } catch (e) {
-    setStatus(`Could not load data: ${e.message}`, true);
+    if (seq === loadSeq) setStatus(`Could not load data: ${e.message}`, true);
   } finally {
-    $("app").classList.remove("loading");
+    if (seq === loadSeq) $("app").classList.remove("loading");
   }
 }
 
 async function sync() {
+  const target = athlete;
   $("sync").disabled = true; setStatus("Syncing with Garmin…");
   try {
-    const res = await fetch("/api/sync", { method: "POST" });
+    const res = await fetch(`/api/sync?${new URLSearchParams({ athlete: target })}`, { method: "POST" });
     const body = await res.json();
     if (!body.ok) throw new Error(body.error);
-    await load();
+    if (target === athlete) await load();
   } catch (e) {
-    setStatus(`Sync failed: ${e.message}`, true);
+    if (target === athlete) setStatus(`Sync failed: ${e.message}`, true);
   } finally {
     $("sync").disabled = false;
   }
+}
+
+async function loadAthletes() {
+  const list = await (await fetch("/api/athletes")).json();
+  const sel = $("athlete");
+  sel.innerHTML = list.map(a => `<option value="${a.id}">${a.name.replace(/</g, "&lt;")}</option>`).join("");
+  sel.classList.toggle("hidden", list.length === 0);
+  if (!list.some(a => a.id === athlete)) athlete = list.length ? list[0].id : null;
+  sel.value = athlete || "";
+  if (!athlete) setStatus("No athletes yet: add GARMIN_PERSONAL_API_KEY to .env or run `python -m dashboard athletes add NAME`", true);
+}
+
+async function showAthlete() {
+  await load();
+  if (data && data.status.id === athlete && data.status.stale) sync();
 }
 
 function syncPresetButtons() {
@@ -678,9 +717,10 @@ function init() {
     metric = b.dataset.metric; syncPresetButtons(); saveRange(); renderTimeline(); renderWeekly();
   });
   $("sync").addEventListener("click", sync);
+  $("athlete").addEventListener("change", e => { athlete = e.target.value; saveRange(); showAthlete(); });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
 
-  load().then(() => { if (data && data.status.stale) sync(); });
+  loadAthletes().then(showAthlete);
 }
 
 init();

@@ -33,6 +33,10 @@ def sync(conn: sqlite3.Connection, client: GarminClient | None = None, log=print
             start = max(HISTORY_START, dt.date.fromisoformat(last) - dt.timedelta(days=RESYNC_DAYS))
         log(f"Syncing Garmin data {start} -> {today}")
 
+        profile = client.profile_settings()
+        store.set_meta(conn, "measurement_system", profile.get("measurementSystem") or "metric")
+        store.set_meta(conn, "display_name", profile.get("displayName") or "")
+
         counts = {}
         dailies = client.daily_summaries(start, today)
         for d in dailies:

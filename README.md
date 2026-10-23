@@ -36,14 +36,40 @@ workouts to the watch.
 ## Training load dashboard
 
 ```
-.venv/bin/python -m dashboard            # sync (if older than 1h) and serve http://localhost:8000
-.venv/bin/python -m dashboard sync       # just pull new data
+.venv/bin/python -m dashboard                      # sync stale athletes, serve http://localhost:8000
+.venv/bin/python -m dashboard sync [--athlete ID]  # just pull new data (default: everyone)
 .venv/bin/python -m dashboard serve --no-sync --port 8001
 ```
 
-Garmin data is cached in `data/garmin.sqlite` (gitignored). The first sync pulls
-everything since 2024-01-01; later syncs re-fetch only the last few days. The page
-also has a Sync button and syncs automatically when the data is over an hour old.
+### Athletes
+
+You are always the athlete `me`, using `GARMIN_PERSONAL_API_KEY` from `.env`.
+To coach others, ask each athlete to create a Personal API key at
+https://connect.garmin.com/app/settings/personalApiToken and send it to you
+privately, then:
+
+```
+.venv/bin/python -m dashboard athletes add "Ana López"   # prompts for the key (hidden)
+.venv/bin/python -m dashboard athletes list
+.venv/bin/python -m dashboard athletes update-key ana-lopez   # after their key expires
+.venv/bin/python -m dashboard athletes remove ana-lopez [--delete-data]
+```
+
+`add` checks the key against Garmin before saving it. Keys are stored in
+`athletes.json` (gitignored, file mode 600). Each athlete's database and token
+live in `data/athletes/<id>/`, so data is never mixed, and units follow each
+athlete's Garmin profile. Pick who to view from the athlete dropdown in the
+dashboard header; new athletes show up there after a page reload, without
+restarting the server.
+
+Athletes can revoke access at any time by deleting their key in Garmin Connect.
+Garmin describes the Personal API as meant for users accessing their own data;
+coaching others with their keys is a gray area, so get their consent.
+
+Each athlete's data is cached in `data/athletes/<id>/garmin.sqlite` (gitignored).
+The first sync pulls everything since 2024-01-01; later syncs re-fetch only the
+last few days. The page also has a Sync button and syncs the selected athlete
+automatically when their data is over an hour old.
 
 A **Today** panel at the top always shows this morning's readiness, whatever the
 range: HRV vs your baseline band, resting HR vs your 28-day average, sleep, Body

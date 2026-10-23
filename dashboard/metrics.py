@@ -13,6 +13,8 @@ import datetime as dt
 import sqlite3
 from statistics import mean
 
+from . import store
+
 SPORTS = ("Swim", "Bike", "Run", "Strength", "Other")
 CTL_DAYS = 42
 ATL_DAYS = 7
@@ -254,7 +256,11 @@ def readiness(ds: Dataset, day: dt.date) -> dict:
               + (" — carrying heavy fatigue" if form / ctl < FORM_FATIGUED else ""))
 
     flags = sum(c["status"] == "flag" for c in checks)
-    if flags == 0:
+    recovery_missing = all(c["status"] == "missing" for c in checks if c["name"] in ("HRV", "Resting HR", "Sleep"))
+    if recovery_missing:
+        cue = {"level": "none", "label": "No recent data",
+               "text": "No HRV, resting HR or sleep to judge readiness. Sync this athlete or check their key."}
+    elif flags == 0:
         cue = {"level": "go", "label": "Good to go",
                "text": "Recovery markers look normal, so a hard session is fine."}
     elif flags == 1:
@@ -331,6 +337,10 @@ def dashboard_data(conn: sqlite3.Connection, start: dt.date, end: dt.date) -> di
 
     in_range = [a for a in ds.activities if start.isoformat() <= a["date"] <= end.isoformat()]
     return {
+        "profile": {
+            "measurement_system": store.get_meta(conn, "measurement_system") or "metric",
+            "display_name": store.get_meta(conn, "display_name"),
+        },
         "range": {"start": start.isoformat(), "end": end.isoformat(), "days": length},
         "today": readiness(ds, dt.date.today()),
         "kpis": {"current": period_kpis(ds, days), "previous": period_kpis(ds, prev_days)},

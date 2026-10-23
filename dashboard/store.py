@@ -6,10 +6,6 @@ import json
 import sqlite3
 from pathlib import Path
 
-from garmin_client.config import PROJECT_ROOT
-
-DB_PATH = PROJECT_ROOT / "data" / "garmin.sqlite"
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS activities (
     id INTEGER PRIMARY KEY,
@@ -64,7 +60,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
 
-def connect(path: Path = DB_PATH) -> sqlite3.Connection:
+def connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row

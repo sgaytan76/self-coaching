@@ -154,3 +154,8 @@ def test_readiness_falls_back_to_latest_morning(conn):
 
     result = readiness_for(conn, today)
     assert result["date"] == "2026-10-22" and not result["is_today"]
+
+
+def test_readiness_without_recovery_data_is_not_good_to_go(conn):
+    result = readiness_for(conn, dt.date(2026, 10, 23))
+    assert result["cue"]["level"] == "none"

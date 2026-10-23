@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 .garmin_token*.json
+# Coached athletes' Garmin keys
+athletes.json
 
 # Python
 __pycache__/

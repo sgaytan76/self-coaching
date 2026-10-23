@@ -360,12 +360,14 @@ function renderTimeline() {
           ...baseOptions().plugins.tooltip,
           filter: item => item.raw != null,
           callbacks: {
+            // On rest days the filter drops every item, so there is nothing to describe.
             title: items => {
+              if (!items.length) return "";
               const d = s[items[0].dataIndex];
               return `${shortDate(d.date)} · ${metric === "load" ? fmt(d.load) + " load" : hm(d.hours)} · ${d.day_type}`;
             },
             label: item => `${item.dataset.label}: ${metric === "load" ? fmt(item.raw) : hm(item.raw)}`,
-            afterBody: items => s[items[0].dataIndex].activities.map(a => `• ${a.name} (${hm(a.hours)}, ${fmt(a.load)} load)`),
+            afterBody: items => !items.length ? [] : s[items[0].dataIndex].activities.map(a => `• ${a.name} (${hm(a.hours)}, ${fmt(a.load)} load)`),
           },
         },
       },
@@ -447,7 +449,7 @@ function renderWeekly() {
     options: baseOptions({
       plugins: { legend: { display: false }, tooltip: { ...baseOptions().plugins.tooltip, filter: i => i.raw != null,
         callbacks: { label: i => `${i.dataset.label}: ${metric === "load" ? fmt(i.raw) : hm(i.raw)}`,
-                     footer: items => { const x = w[items[0].dataIndex]; return `Total: ${metric === "load" ? fmt(x.load) : hm(x.hours)}`; } } } },
+                     footer: items => { if (!items.length) return ""; const x = w[items[0].dataIndex]; return `Total: ${metric === "load" ? fmt(x.load) : hm(x.hours)}`; } } } },
       scales: { ...baseOptions().scales, x: { ...baseOptions().scales.x, stacked: true }, y: { ...baseOptions().scales.y, stacked: true } },
     }),
   });

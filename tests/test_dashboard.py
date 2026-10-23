@@ -98,3 +98,59 @@ def test_weekly_buckets_start_on_monday(conn):
     conn.commit()
     data = metrics.dashboard_data(conn, dt.date(2026, 10, 19), dt.date(2026, 10, 26))
     assert [(w["week"], w["hours"]) for w in data["weekly"]] == [("2026-10-19", 2.0), ("2026-10-26", 1.0)]
+
+
+def seed_recovery(conn, day: dt.date, hrv: float, rhr: float, score: float, sleep_h: float = 7.5) -> None:
+    key = day.isoformat()
+    store.upsert_hrv(conn, {"calendarDate": key, "lastNightAvg": hrv, "status": "BALANCED",
+                            "baseline": {"balancedLow": 40, "balancedUpper": 50}})
+    store.upsert_daily(conn, {"calendarDate": key, "heartRate": {"restingValue": rhr}})
+    store.upsert_sleep(conn, {"calendarDate": key, "sleepTimeSeconds": sleep_h * 3600,
+                              "sleepScores": {"overall": {"value": score}}})
+
+
+def readiness_for(conn, today: dt.date) -> dict:
+    conn.commit()
+    return metrics.readiness(metrics.Dataset(conn, today), today)
+
+
+def test_readiness_good_to_go_when_markers_normal(conn):
+    today = dt.date(2026, 10, 23)
+    for i in range(1, 29):
+        seed_recovery(conn, today - dt.timedelta(days=i), hrv=45, rhr=50, score=80)
+    seed_recovery(conn, today, hrv=46, rhr=50, score=82)
+
+    result = readiness_for(conn, today)
+    assert result["is_today"] and result["cue"]["level"] == "go"
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["HRV"] == statuses["Resting HR"] == statuses["Sleep"] == "ok"
+    assert result["rhr_baseline"] == 50
+
+
+def test_readiness_flags_low_hrv_and_elevated_rhr(conn):
+    today = dt.date(2026, 10, 23)
+    for i in range(1, 29):
+        seed_recovery(conn, today - dt.timedelta(days=i), hrv=45, rhr=50, score=80)
+    seed_recovery(conn, today, hrv=35, rhr=55, score=80)
+
+    result = readiness_for(conn, today)
+    flagged = [c["name"] for c in result["checks"] if c["status"] == "flag"]
+    assert flagged == ["HRV", "Resting HR"]
+    assert result["cue"]["level"] == "easy"
+
+
+def test_readiness_one_flag_is_moderate(conn):
+    today = dt.date(2026, 10, 23)
+    for i in range(1, 29):
+        seed_recovery(conn, today - dt.timedelta(days=i), hrv=45, rhr=50, score=80)
+    seed_recovery(conn, today, hrv=45, rhr=50, score=50)  # poor sleep only
+
+    assert readiness_for(conn, today)["cue"]["level"] == "moderate"
+
+
+def test_readiness_falls_back_to_latest_morning(conn):
+    today = dt.date(2026, 10, 23)
+    seed_recovery(conn, today - dt.timedelta(days=1), hrv=45, rhr=50, score=80)
+
+    result = readiness_for(conn, today)
+    assert result["date"] == "2026-10-22" and not result["is_today"]

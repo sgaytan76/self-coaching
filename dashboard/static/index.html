@@ -78,6 +78,27 @@
   .tile .delta { font-size: 12px; color: var(--muted); }
   .delta .up-good, .delta .down-good { color: var(--good-text); font-weight: 600; }
   .delta .up-bad, .delta .down-bad { color: var(--critical); font-weight: 600; }
+  .today { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px 24px; }
+  @media (max-width: 760px) { .today { grid-template-columns: 1fr; } }
+  .cue { border-radius: 10px; padding: 14px 16px; border: 1px solid var(--border); border-left: 6px solid var(--cue); }
+  .cue .eyebrow { color: var(--ink-2); font-size: 12px; }
+  .cue .label { display: flex; align-items: center; gap: 8px; font-size: 20px; font-weight: 700; margin: 4px 0; }
+  .cue .icon { width: 22px; height: 22px; border-radius: 50%; background: var(--cue); color: #fff;
+               display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; flex: none; }
+  .cue p { margin: 0; color: var(--ink-2); font-size: 13px; }
+  .today-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px 16px; align-content: start; }
+  .today-stats .label { color: var(--ink-2); font-size: 12px; }
+  .today-stats .value { font-size: 18px; font-weight: 650; }
+  .today-stats .value small { font-size: 12px; font-weight: 500; color: var(--ink-2); }
+  .today-stats .note { color: var(--muted); font-size: 11.5px; }
+  .checks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+  .checks li { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+  .checks .mark { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+                  font-size: 10px; font-weight: 800; color: #fff; flex: none; }
+  .checks .ok .mark { background: var(--good); }
+  .checks .flag .mark { background: var(--serious); }
+  .checks .flag { color: var(--ink); font-weight: 600; }
+  .checks .missing .mark { background: var(--axis); }
   .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
   .pill i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
@@ -111,6 +132,8 @@
     <div class="filters" role="group" aria-label="Date range">
       <div class="seg" id="presets">
         <button data-days="7">7d</button>
+        <button data-days="14">14d</button>
+        <button data-days="21">21d</button>
         <button data-days="28">28d</button>
         <button data-days="90">90d</button>
         <button data-days="182">6m</button>
@@ -124,6 +147,11 @@
       <button class="btn" id="sync">Sync</button>
     </div>
   </header>
+
+  <section class="card" aria-labelledby="today-title">
+    <h2 id="today-title" class="hidden">Today</h2>
+    <div class="today" id="today"></div>
+  </section>
 
   <section class="kpis" id="kpis"></section>
 
@@ -337,6 +365,41 @@ function renderKpis() {
     `<div class="tile"><div class="label">${label}</div><div class="value">${value}</div>${foot}</div>`).join("");
 }
 
+// ---------- today / readiness ----------
+const CUE_VARS = { go: ["--good", "✓"], moderate: ["--warning", "!"], easy: ["--serious", "↓"] };
+const CHECK_MARKS = { ok: "✓", flag: "!", missing: "–" };
+
+function renderToday() {
+  const t = data.today;
+  if (!t) return;
+  const [cueVar, cueIcon] = CUE_VARS[t.cue.level];
+  const when = t.is_today ? "This morning" : `Latest data: ${shortDate(t.date)}`;
+  const hrvNote = t.hrv_low != null ? `baseline ${fmt(t.hrv_low)}–${fmt(t.hrv_high)}` : "";
+  const rhrNote = t.rhr_baseline != null ? `28-day avg ${fmt(t.rhr_baseline, 1)}` : "";
+  const stat = (label, value, note = "") =>
+    `<div><div class="label">${label}</div><div class="value">${value}</div><div class="note">${note}</div></div>`;
+  const st = formStatus(t.form, t.ctl), ac = acwrStatus(t.acwr);
+
+  $("today").innerHTML = `
+    <div class="cue" style="--cue:${css(cueVar)}">
+      <div class="eyebrow">${when}</div>
+      <div class="label"><span class="icon" aria-hidden="true">${cueIcon}</span>${t.cue.label}</div>
+      <p>${t.cue.text}</p>
+    </div>
+    <div class="today-stats">
+      ${stat("HRV", `${fmt(t.hrv)} <small>ms</small>`, hrvNote)}
+      ${stat("Resting HR", `${fmt(t.rhr)} <small>bpm</small>`, rhrNote)}
+      ${stat("Sleep", hm(t.sleep_h), t.sleep_score != null ? `score ${fmt(t.sleep_score)}` : "")}
+      ${stat("Body Battery", fmt(t.body_battery), "high so far today")}
+      ${stat("Yesterday", t.yesterday_load != null ? `${fmt(t.yesterday_load)} <small>load</small>` : "–", t.yesterday_hours ? hm(t.yesterday_hours) : "rest day")}
+      ${stat("Form", `${t.form > 0 ? "+" : ""}${fmt(t.form)}`, st ? st[0] : "")}
+      ${stat("ACWR", fmt(t.acwr, 2), ac ? ac[0] : "")}
+    </div>
+    <ul class="checks">
+      ${t.checks.map(c => `<li class="${c.status}"><span class="mark" aria-hidden="true">${CHECK_MARKS[c.status]}</span>${c.text}</li>`).join("")}
+    </ul>`;
+}
+
 // ---------- training vs recovery ----------
 function renderTimeline() {
   const s = data.series, labels = s.map(d => shortDate(d.date));
@@ -544,7 +607,7 @@ function renderActivities() {
 // ---------- data flow ----------
 function renderAll() {
   if (!data) return;
-  renderKpis(); renderTimeline(); renderLoadModel(); renderWeekly(); renderZones(); renderNextDay(); renderActivities();
+  renderToday(); renderKpis(); renderTimeline(); renderLoadModel(); renderWeekly(); renderZones(); renderNextDay(); renderActivities();
 }
 
 function setStatus(text, err = false) { $("status").textContent = text; $("status").classList.toggle("err", err); }

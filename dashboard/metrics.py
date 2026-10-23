@@ -177,6 +177,108 @@ def next_day_response(ds: Dataset, days: list[dt.date]) -> dict:
     }
 
 
+# Readiness thresholds: each one that trips counts as a warning sign.
+RHR_BASELINE_DAYS = 28
+RHR_ELEVATED_BPM = 3
+SLEEP_SCORE_LOW = 60
+SLEEP_HOURS_LOW = 6
+ACWR_HIGH = 1.5
+FORM_FATIGUED = -0.3  # form as a fraction of fitness
+
+
+def readiness(ds: Dataset, day: dt.date) -> dict:
+    """This morning's recovery markers, the load going into the day, and a training cue.
+
+    Uses the latest morning on or before `day` that has HRV or sleep data, so the
+    panel still shows something before today's data has synced.
+    """
+    key = day.isoformat()
+    mornings = [d for d in list(ds.hrv) + list(ds.sleep) if d <= key]
+    as_of = dt.date.fromisoformat(max(mornings)) if mornings else day
+    rec = ds.recovery(as_of.isoformat())
+    yesterday = ds.by_day.get((as_of - dt.timedelta(days=1)).isoformat(), {})
+    going_in = ds.by_day.get(as_of.isoformat(), {})
+
+    rhr_baseline = avg(
+        ds.daily.get((as_of - dt.timedelta(days=i)).isoformat(), {}).get("resting_hr")
+        for i in range(1, RHR_BASELINE_DAYS + 1)
+    )
+    # Form is already computed from yesterday's values; ACWR uses yesterday so that
+    # training done earlier today doesn't change the morning's verdict.
+    form, ctl, acwr = going_in.get("form"), going_in.get("ctl"), yesterday.get("acwr")
+
+    checks = []
+
+    def check(name: str, ok: bool | None, text: str) -> None:
+        checks.append({"name": name, "status": "missing" if ok is None else ("ok" if ok else "flag"), "text": text})
+
+    hrv, low, high, status = rec["hrv"], rec["hrv_low"], rec["hrv_high"], rec["hrv_status"]
+    if hrv is None:
+        check("HRV", None, "No HRV reading for last night")
+    elif low is not None and hrv < low:
+        check("HRV", False, f"HRV {hrv:.0f} ms is below your baseline ({low:.0f}–{high:.0f})")
+    elif status in ("LOW", "POOR"):
+        check("HRV", False, f"Garmin rates your HRV status as {status.lower()}")
+    else:
+        band = f" (baseline {low:.0f}–{high:.0f})" if low is not None and high is not None else ""
+        check("HRV", True, f"HRV {hrv:.0f} ms{band}")
+
+    rhr = rec["rhr"]
+    if rhr is None or rhr_baseline is None:
+        check("Resting HR", None, "No resting heart rate yet")
+    else:
+        diff = rhr - rhr_baseline
+        sign = "+" if diff >= 0 else "−"
+        check("Resting HR", diff < RHR_ELEVATED_BPM,
+              f"Resting HR {rhr:.0f} bpm ({sign}{abs(diff):.1f} vs your {RHR_BASELINE_DAYS}-day average)")
+
+    score, hours = rec["sleep_score"], rec["sleep_h"]
+    if score is None and hours is None:
+        check("Sleep", None, "No sleep recorded for last night")
+    else:
+        poor = (score is not None and score < SLEEP_SCORE_LOW) or (hours is not None and hours < SLEEP_HOURS_LOW)
+        parts = [f"score {score:.0f}" if score is not None else None,
+                 f"{int(hours)}h {round(hours % 1 * 60):02d}m" if hours is not None else None]
+        check("Sleep", not poor, "Sleep " + ", ".join(p for p in parts if p))
+
+    if acwr is None:
+        check("Load ramp", None, "Not enough history for ACWR")
+    else:
+        check("Load ramp", acwr <= ACWR_HIGH, f"ACWR {acwr:.2f}" + (" — ramping fast" if acwr > ACWR_HIGH else ""))
+
+    if form is None or not ctl:
+        check("Fatigue", None, "Not enough history for form")
+    else:
+        check("Fatigue", form / ctl >= FORM_FATIGUED,
+              f"Form {form:+.0f} ({form / ctl:+.0%} of fitness)"
+              + (" — carrying heavy fatigue" if form / ctl < FORM_FATIGUED else ""))
+
+    flags = sum(c["status"] == "flag" for c in checks)
+    if flags == 0:
+        cue = {"level": "go", "label": "Good to go",
+               "text": "Recovery markers look normal, so a hard session is fine."}
+    elif flags == 1:
+        cue = {"level": "moderate", "label": "Keep it moderate",
+               "text": "One marker is off: train as planned but cap the intensity."}
+    else:
+        cue = {"level": "easy", "label": "Easy day or rest",
+               "text": f"{flags} markers are off: favor an easy session or rest."}
+
+    return {
+        "date": as_of.isoformat(),
+        "is_today": as_of == day,
+        "cue": cue,
+        "checks": checks,
+        **rec,
+        "rhr_baseline": rhr_baseline,
+        "yesterday_load": round(yesterday["load"]) if yesterday else None,
+        "yesterday_hours": round(yesterday["hours"], 2) if yesterday else None,
+        "form": form,
+        "ctl": ctl,
+        "acwr": acwr,
+    }
+
+
 def weekly(ds: Dataset, days: list[dt.date]) -> list[dict]:
     weeks: dict[str, dict] = {}
     for d in days:
@@ -230,6 +332,7 @@ def dashboard_data(conn: sqlite3.Connection, start: dt.date, end: dt.date) -> di
     in_range = [a for a in ds.activities if start.isoformat() <= a["date"] <= end.isoformat()]
     return {
         "range": {"start": start.isoformat(), "end": end.isoformat(), "days": length},
+        "today": readiness(ds, dt.date.today()),
         "kpis": {"current": period_kpis(ds, days), "previous": period_kpis(ds, prev_days)},
         "series": series,
         "weekly": weekly(ds, days),

@@ -45,7 +45,15 @@ Garmin data is cached in `data/garmin.sqlite` (gitignored). The first sync pulls
 everything since 2024-01-01; later syncs re-fetch only the last few days. The page
 also has a Sync button and syncs automatically when the data is over an hour old.
 
-What it shows for the selected range (7d / 28d / 90d / 6m / 1y / custom):
+A **Today** panel at the top always shows this morning's readiness, whatever the
+range: HRV vs your baseline band, resting HR vs your 28-day average, sleep, Body
+Battery, yesterday's load, form and ACWR. Each trips a warning when it is off
+(HRV below baseline or Garmin status LOW, resting HR 3+ bpm above average, sleep
+score under 60 or under 6h, ACWR over 1.5, form below -30% of fitness), giving a
+cue: 0 warnings = good to go, 1 = keep it moderate, 2+ = easy day or rest.
+
+What it shows for the selected range (7d / 14d / 21d / 28d / 90d / 6m / 1y / custom;
+14d and 21d fit a typical 2-3 week training block):
 
 - **KPIs** with change vs the previous period of the same length.
 - **Training vs recovery**: daily load or hours by sport (Swim / Bike / Run /

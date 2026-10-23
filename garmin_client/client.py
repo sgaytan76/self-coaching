@@ -53,11 +53,16 @@ class GarminClient:
         resp = self._request(path, params)
         return resp.json() if resp.content else None
 
-    def _ranged(self, max_days: int, start: DateLike, end: DateLike, fetch) -> list:
-        """Call `fetch(start, end)` per window of at most `max_days` days and merge the lists."""
+    def _ranged(self, max_days: int, start: DateLike, end: DateLike, fetch, key: str | None = None) -> list:
+        """Call `fetch(start, end)` per window of at most `max_days` days and merge the lists.
+
+        `key` names the field holding the list when the endpoint wraps it in an object.
+        """
         items: list = []
         for s, e in date_windows(start, end, max_days):
             result = fetch(s.isoformat(), e.isoformat())
+            if key and isinstance(result, dict):
+                result = result.get(key)
             if isinstance(result, list):
                 items.extend(result)
             elif result is not None:
@@ -76,7 +81,7 @@ class GarminClient:
 
     def daily_summaries(self, start: DateLike, end: DateLike) -> list:
         return self._ranged(180, start, end, lambda s, e: self.get(
-            "/usersummary-service/v2/dailysummaries", {"startDate": s, "endDate": e}))
+            "/usersummary-service/v2/dailysummaries", {"startDate": s, "endDate": e}), key="data")
 
     def sleep_summaries(self, start: DateLike, end: DateLike) -> list:
         return self._ranged(28, start, end, lambda s, e: self.get(
@@ -84,7 +89,7 @@ class GarminClient:
 
     def hrv_summaries(self, start: DateLike, end: DateLike) -> list:
         return self._ranged(180, start, end, lambda s, e: self.get(
-            f"/hrv-service/hrv/daily/{s}/{e}"))
+            f"/hrv-service/hrv/daily/{s}/{e}"), key="hrvSummaries")
 
     def body_battery(self, start: DateLike, end: DateLike) -> list:
         return self._ranged(28, start, end, lambda s, e: self.get(

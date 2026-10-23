@@ -7,8 +7,9 @@ Uses the Garmin Connect **Personal API** (read-only, your own account only).
 
 1. Create a key at https://connect.garmin.com/app/settings/personalApiToken
    (pick an expiry of 30 days to 1 year; the key is shown only once).
-2. Set up the environment:
-   `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`
+2. Set up the environment with Python 3.10+ (macOS's built-in Python 3.9 uses
+   LibreSSL 2.8, which Garmin's servers reject). With [uv](https://docs.astral.sh/uv/):
+   `uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt`
 3. Copy `.env.example` to `.env` (gitignored) and set `GARMIN_PERSONAL_API_KEY`.
 4. Verify: `.venv/bin/python -m garmin_client test` — prints your profile, the last
    7 days of daily summaries and your latest activities.

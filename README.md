@@ -32,3 +32,29 @@ client.download_activity(activity_id)  # ZIP with the original .FIT
 Per-request range limits (handled by the client): daily summaries and HRV 180 days,
 sleep and Body Battery 28 days, stress and steps 7 days. The API cannot send
 workouts to the watch.
+
+## Training load dashboard
+
+```
+.venv/bin/python -m dashboard            # sync (if older than 1h) and serve http://localhost:8000
+.venv/bin/python -m dashboard sync       # just pull new data
+.venv/bin/python -m dashboard serve --no-sync --port 8001
+```
+
+Garmin data is cached in `data/garmin.sqlite` (gitignored). The first sync pulls
+everything since 2024-01-01; later syncs re-fetch only the last few days. The page
+also has a Sync button and syncs automatically when the data is over an hour old.
+
+What it shows for the selected range (7d / 28d / 90d / 6m / 1y / custom):
+
+- **KPIs** with change vs the previous period of the same length.
+- **Training vs recovery**: daily load or hours by sport (Swim / Bike / Run /
+  Strength / Other), stacked over HRV (with your baseline band), resting HR, sleep
+  hours and sleep score on the same dates.
+- **Load model** from Garmin's per-activity training load: fitness (42-day EWMA),
+  fatigue (7-day EWMA), form (yesterday's fitness - fatigue) and ACWR (7-day vs
+  28-day mean load). These always use the full history, not just the range.
+- **Weekly volume** by sport and **intensity distribution** (time in HR zones 1-5).
+- **Next-day response**: days are rest / easy / hard (hard = top 25% of your
+  training-day loads); shows how the following morning's HRV, resting HR and
+  sleep compare with the range average.

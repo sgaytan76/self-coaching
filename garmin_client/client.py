@@ -144,6 +144,6 @@ class GarminClient:
 
     def download_activity(self, activity_id: int) -> bytes:
         """Return the original activity file as ZIP bytes (usually a .FIT inside)."""
-        return self._request(
-            f"/download-service/files/activity/{activity_id}", accept="application/octet-stream"
-        ).content
+        # Garmin replies with application/x-zip-compressed and answers 406 to
+        # narrower Accept headers such as application/octet-stream or application/zip.
+        return self._request(f"/download-service/files/activity/{activity_id}", accept="*/*").content

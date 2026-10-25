@@ -141,6 +141,31 @@
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .scroll { overflow-x: auto; max-height: 420px; overflow-y: auto; }
   .note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .cal-scroll { max-height: 760px; overflow-y: auto; margin-top: 4px; }
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(84px, .8fr); gap: 4px; }
+  .cal-head { position: sticky; top: 0; z-index: 1; background: var(--surface); color: var(--ink-2);
+              font-size: 12px; font-weight: 600; padding: 2px 6px 4px; box-shadow: 0 4px 0 var(--surface); }
+  .cal-day, .cal-week { min-height: 92px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 6px; min-width: 0; }
+  .cal-day.out { border-style: dashed; border-color: var(--grid); background: none; }
+  .cal-day.is-today { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+  .cal-date { display: flex; justify-content: space-between; gap: 4px; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .cal-date .total { color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .cal-date .wd { display: none; }
+  .cal-act { border-left: 3px solid var(--c); background: var(--band); border-radius: 0 4px 4px 0;
+             padding: 2px 5px; margin-top: 3px; font-size: 11.5px; line-height: 1.3; }
+  .cal-act .nm { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+  .cal-act .dur { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .cal-rest { color: var(--muted); font-size: 11.5px; }
+  .cal-week { background: var(--band); font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .cal-week b { display: block; color: var(--ink); font-size: 14px; }
+  @media (max-width: 760px) {
+    .cal { grid-template-columns: 1fr; }
+    .cal-head, .cal-day.out { display: none; }
+    .cal-day, .cal-week { min-height: 0; }
+    .cal-date .wd { display: inline; color: var(--ink-2); font-weight: 500; }
+    .cal-week { margin-bottom: 10px; }
+    .cal-week b { display: inline; margin-right: 8px; }
+  }
   .hidden { display: none !important; }
   .loading { opacity: .5; transition: opacity .2s; }
 </style>
@@ -257,7 +282,7 @@
   <section class="card">
     <h2 data-info="activities">Activities</h2>
     <p class="sub" id="act-sub"></p>
-    <div class="scroll"><table id="act-table"></table></div>
+    <div class="cal-scroll" id="cal-scroll"><div class="cal" id="cal"></div></div>
   </section>
 </main>
 <div id="tip" class="tip" role="tooltip" hidden></div>
@@ -442,7 +467,7 @@ const INFO = {
     <p><b>How to use it:</b> this is your personal cost of a hard day. A large hit (HRV well down, resting HR up, worse sleep) means you need an easy day after hard ones, and that sleep and fueling after key sessions matter.</p>
     <p>Compare training blocks: as fitness improves, the same hard day should cost you less. Use 90 days or more for reliable averages; short ranges have few days per group.</p>`],
   activities: ["Activities", `
-    <p><b>What it shows:</b> every activity in the range with time, distance, Garmin training load, aerobic training effect (TE) and average heart rate.</p>
+    <p><b>What it shows:</b> a Mon–Sun calendar of the selected range. Each day lists its activities with duration and Garmin training load; the last column totals the week. Hover an activity for distance, aerobic training effect (TE) and average heart rate.</p>
     <p><b>How to use it:</b> check that sessions did what they were meant to. Aerobic TE (Garmin's 0–5 scale): <b>below 2</b> is recovery, <b>2–2.9</b> maintains, <b>3–3.9</b> improves, <b>4–4.9</b> highly improves, <b>5</b> is overreaching.</p>
     <p>Easy days should stay below about 3. Key workouts should reach 3.5 or more. If every session lands around 3, your intensity isn't varied enough.</p>`],
 };
@@ -709,17 +734,48 @@ function renderNextDay() {
 }
 
 // ---------- activities ----------
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const dur = s => { const m = Math.round((s || 0) / 60); return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`; };
+
+// Mon–Sun calendar of the selected range; days outside it are left as empty placeholders.
 function renderActivities() {
-  const acts = data.activities;
-  $("act-sub").textContent = `${acts.length} activities in range, newest first.`;
-  $("act-table").innerHTML = `<thead><tr><th>Date</th><th>Activity</th><th>Sport</th><th class="num">Time</th><th class="num">Distance</th>
-    <th class="num">Load</th><th class="num">Aerobic TE</th><th class="num">Avg HR</th></tr></thead><tbody>` +
-    acts.map(a => `<tr><td>${shortDate(a.date)}</td><td>${(a.name || "").replace(/</g, "&lt;")}</td>
-      <td><span class="pill"><i style="background:${css(SPORT_VARS[a.sport])}"></i>${a.sport}</span></td>
-      <td class="num">${hm((a.duration_s || 0) / 3600)}</td>
-      <td class="num">${distance(a.distance_m, a.sport)}</td>
-      <td class="num">${fmt(a.load)}</td><td class="num">${fmt(a.aerobic_te, 1)}</td><td class="num">${fmt(a.avg_hr)}</td></tr>`).join("") +
-    `</tbody>`;
+  const { start, end } = data.range;
+  const byDay = {};
+  for (const a of data.activities) (byDay[a.date] ||= []).push(a);
+  Object.values(byDay).forEach(list => list.sort((a, b) => a.start_local.localeCompare(b.start_local)));
+  const totalS = data.activities.reduce((t, a) => t + (a.duration_s || 0), 0);
+  $("act-sub").textContent = `${data.activities.length} activities, ${dur(totalS)} in range. Hover an activity for details.`;
+
+  const first = new Date(start + "T00:00"), last = new Date(end + "T00:00");
+  const day = new Date(first); day.setDate(first.getDate() - (first.getDay() + 6) % 7);
+  const today = localISO(new Date());
+  let html = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "Week"].map(d => `<div class="cal-head">${d}</div>`).join("");
+  while (day <= last) {
+    let weekS = 0, weekLoad = 0, weekN = 0;
+    for (let i = 0; i < 7; i++, day.setDate(day.getDate() + 1)) {
+      const key = localISO(day);
+      if (key < start || key > end) { html += `<div class="cal-day out" aria-hidden="true"></div>`; continue; }
+      const acts = byDay[key] || [];
+      const dayS = acts.reduce((t, a) => t + (a.duration_s || 0), 0);
+      weekS += dayS; weekLoad += acts.reduce((t, a) => t + (a.load || 0), 0); weekN += acts.length;
+      const label = day.getDate() === 1 || key === start
+        ? day.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : day.getDate();
+      const wd = day.toLocaleDateString(undefined, { weekday: "short" });
+      html += `<div class="cal-day${key === today ? " is-today" : ""}">
+        <div class="cal-date"><span><span class="wd">${wd} </span>${label}</span>${acts.length ? `<span class="total">${dur(dayS)}</span>` : ""}</div>
+        ${acts.length ? acts.map(a => {
+          const tip = [a.name, `${a.sport} · ${dur(a.duration_s)}`, a.distance_m ? distance(a.distance_m, a.sport) : null,
+            `Load ${fmt(a.load)} · Aerobic TE ${fmt(a.aerobic_te, 1)}`, a.avg_hr ? `Avg HR ${fmt(a.avg_hr)} bpm` : null].filter(Boolean).join("\n");
+          return `<div class="cal-act" style="--c:${css(SPORT_VARS[a.sport])}" title="${esc(tip)}">
+            <span class="nm">${esc(a.name || a.sport)}</span><span class="dur">${dur(a.duration_s)}${a.load ? ` · ${fmt(a.load)} load` : ""}</span></div>`;
+        }).join("") : `<div class="cal-rest">Rest</div>`}
+      </div>`;
+    }
+    html += `<div class="cal-week"><b>${dur(weekS)}</b>${fmt(weekLoad)} load<br>${weekN} sessions</div>`;
+  }
+  $("cal").innerHTML = html;
+  const box = $("cal-scroll");
+  box.scrollTop = box.scrollHeight;  // long ranges open on the most recent weeks
 }
 
 // ---------- data flow ----------

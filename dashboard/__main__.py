@@ -1,12 +1,13 @@
-"""python -m dashboard [serve|sync|athletes] — run the training load dashboard."""
+"""python -m dashboard [serve|sync|athletes|import-fit] — run the training load dashboard."""
 
 import argparse
 import getpass
 import sys
+from pathlib import Path
 
 from garmin_client import GarminClient
 
-from . import athletes, server, store, sync
+from . import athletes, fitimport, server, store, sync
 
 
 def prompt_key(name: str) -> str:
@@ -79,6 +80,30 @@ def athletes_command(args) -> None:
                                          else ". Their synced data is still in data/athletes/."))
 
 
+def import_fit_command(args) -> None:
+    athlete = athletes.get(args.athlete)
+    if athlete is None:
+        sys.exit(f"Unknown athlete '{args.athlete}'. See: python -m dashboard athletes list")
+    path = Path(args.file).expanduser()
+    if not path.is_file():
+        sys.exit(f"No such file: {path}")
+    try:
+        fa = fitimport.read_fit(path)
+    except Exception as exc:
+        sys.exit(f"Could not read {path.name} as a FIT file: {exc}")
+    try:
+        a = fitimport.import_fit(store.connect(athlete.db_path), GarminClient(athlete.settings()), fa,
+                                 source=path.name, name=args.name, ftp=args.ftp, force=args.force)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    hours = (a["duration"] or 0) / 3600
+    power = f", NP {a['normPower']:g} W" if a["normPower"] else ""
+    hr = f", HR avg {a['averageHR']} max {a['maxHR']}" if a["averageHR"] else ""
+    print(f"[{athlete.id}] Imported '{a['activityName']}' on {a['startTimeLocal']}: "
+          f"{int(hours)}h {round(hours % 1 * 60):02d}m{power}{hr}, load {a['activityTrainingLoad']}.")
+    print(f"  {a['importNote']}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m dashboard")
     sub = parser.add_subparsers(dest="command")
@@ -101,11 +126,21 @@ def main() -> None:
     rm.add_argument("id")
     rm.add_argument("--delete-data", action="store_true", help="Also delete their synced data")
 
+    imp = sub.add_parser("import-fit", help="Add an activity from a .fit/.fit.gz file (e.g. Zwift)")
+    imp.add_argument("file")
+    imp.add_argument("--athlete", default=athletes.SELF_ID, help="Athlete id (default: me)")
+    imp.add_argument("--name", help="Activity name (default: e.g. 'Zwift ride (imported)')")
+    imp.add_argument("--ftp", type=float, help="FTP in watts for IF/TSS (default: from their latest ride)")
+    imp.add_argument("--force", action="store_true",
+                     help="Import even if Garmin already has an activity at that time")
+
     args = parser.parse_args()
     if args.command == "sync":
         sync_athletes(args.athlete)
     elif args.command == "athletes":
         athletes_command(args)
+    elif args.command == "import-fit":
+        import_fit_command(args)
     else:
         server.serve(
             port=getattr(args, "port", 8000), sync_on_start=not getattr(args, "no_sync", False)

@@ -66,6 +66,32 @@ Athletes can revoke access at any time by deleting their key in Garmin Connect.
 Garmin describes the Personal API as meant for users accessing their own data;
 coaching others with their keys is a gray area, so get their consent.
 
+### Activities recorded outside Garmin (Zwift and others)
+
+When a session never reaches Garmin Connect, download its `.fit` (or `.fit.gz`)
+file and import it:
+
+```
+.venv/bin/python -m dashboard import-fit ~/Downloads/zwift-activity-123.fit.gz --athlete jose-moll
+```
+
+Options: `--name` sets the title (default e.g. "Zwift ride (imported)"), `--ftp` the
+watts used for IF/TSS (default: the FTP Garmin used on their latest ride), and
+`--force` imports even when Garmin already has an activity of that sport within
+15 minutes. The activity is then treated like any other in the dashboard:
+
+- Heart rate comes from the file, or, when it has none (Zwift often doesn't), from
+  the athlete's watch all-day readings during the session (one every ~2 minutes).
+- Garmin's training load can't be recomputed, so it is estimated from heart rate
+  (Banister TRIMP), scaled by the athlete's median ratio of Garmin load to TRIMP
+  over their own Garmin activities. Without any heart rate there is no load.
+- Local time uses the athlete's time zone from their latest Garmin activity.
+
+Imported activities have negative ids: syncs never touch them and re-importing the
+same file replaces it. If the same session later reaches Garmin Connect too, it will
+show twice; remove the import with
+`sqlite3 data/athletes/<id>/garmin.sqlite "DELETE FROM activities WHERE id = <id>"`.
+
 Each athlete's data is cached in `data/athletes/<id>/garmin.sqlite` (gitignored).
 The first sync pulls everything since 2024-01-01; later syncs re-fetch only the
 last few days. The page also has a Sync button and syncs the selected athlete

@@ -97,6 +97,12 @@ def make_handler(registry: Registry):
                 self._send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             elif url.path == "/api/athletes":
                 self._json([s.status() for s in registry.all()])
+            elif url.path == "/api/overview":
+                today, out = dt.date.today(), []
+                for state in registry.all():
+                    with state.lock:
+                        out.append({**state.status(), **metrics.athlete_summary(state.conn, today)})
+                self._json(out)
             elif url.path == "/api/status":
                 state = self._athlete(query)
                 if state:

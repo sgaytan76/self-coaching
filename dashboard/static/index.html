@@ -166,6 +166,37 @@
     .cal-week { margin-bottom: 10px; }
     .cal-week b { display: inline; margin-right: 8px; }
   }
+  .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; margin-top: 4px; }
+  @media (max-width: 520px) { .ov-grid { grid-template-columns: 1fr; } }
+  .ov-card { background: var(--surface); border: 1px solid var(--border); border-left: 6px solid var(--cue);
+             border-radius: 12px; padding: 14px 16px; cursor: pointer; text-align: left; font: inherit; color: inherit;
+             display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .ov-card:hover, .ov-card:focus-visible { border-color: var(--axis); border-left-color: var(--cue); outline: none;
+             box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+  .ov-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .ov-name { font-size: 16px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-sync { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+  .ov-sync.err { color: var(--critical); font-weight: 600; }
+  .ov-cue { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
+  .ov-cue .icon { width: 20px; height: 20px; border-radius: 50%; background: var(--cue); color: #fff; flex: none;
+                  display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+  .ov-cue small { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .ov-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .ov-stats .label { color: var(--ink-2); font-size: 11px; }
+  .ov-stats .value { font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .ov-stats .note { font-size: 10.5px; line-height: 1.25; color: var(--muted); }
+  .ov-stats .bad .value { color: var(--critical); }
+  .ov-flags { margin: 0; padding: 0; list-style: none; font-size: 12.5px; display: grid; gap: 2px; }
+  .ov-flags li { color: var(--ink); font-weight: 600; }
+  .ov-flags li::before { content: "! "; color: var(--serious); font-weight: 800; }
+  .ov-week { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; font-size: 12.5px; color: var(--ink-2); }
+  .ov-week b { color: var(--ink); font-size: 14px; }
+  .ov-spark { flex: none; width: 112px; height: 30px; }
+  .ov-spark rect { fill: var(--s1); }
+  .ov-spark rect.today { fill: var(--ink-2); }
+  .ov-last { font-size: 12px; color: var(--ink-2); border-top: 1px solid var(--grid); padding-top: 8px;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ov-last.stale { color: var(--critical); }
   .hidden { display: none !important; }
   .loading { opacity: .5; transition: opacity .2s; }
 </style>
@@ -195,6 +226,13 @@
     </div>
   </header>
 
+  <section id="overview" class="hidden" aria-labelledby="ov-title">
+    <h2 id="ov-title" data-info="overview">All athletes</h2>
+    <p class="sub">Who needs attention first. Click an athlete to open their dashboard.</p>
+    <div class="ov-grid" id="ov-grid"></div>
+  </section>
+
+  <div id="athlete-view">
   <section class="card" aria-labelledby="today-title">
     <h2 id="today-title" class="hidden">Today</h2>
     <div class="today" id="today"></div>
@@ -284,6 +322,7 @@
     <p class="sub" id="act-sub"></p>
     <div class="cal-scroll" id="cal-scroll"><div class="cal" id="cal"></div></div>
   </section>
+  </div>
 </main>
 <div id="tip" class="tip" role="tooltip" hidden></div>
 
@@ -470,6 +509,10 @@ const INFO = {
     <p><b>What it shows:</b> a Mon–Sun calendar of the selected range. Each day lists its activities with duration and Garmin training load; the last column totals the week. Hover an activity for distance, aerobic training effect (TE) and average heart rate.</p>
     <p><b>How to use it:</b> check that sessions did what they were meant to. Aerobic TE (Garmin's 0–5 scale): <b>below 2</b> is recovery, <b>2–2.9</b> maintains, <b>3–3.9</b> improves, <b>4–4.9</b> highly improves, <b>5</b> is overreaching.</p>
     <p>Easy days should stay below about 3. Key workouts should reach 3.5 or more. If every session lands around 3, your intensity isn't varied enough.</p>`],
+  overview: ["All athletes", `
+    <p><b>What it shows:</b> one card per athlete with this morning's readiness (the same checks as their Today panel), the last 7 days against the 7 before, daily load over the last 14 days, and their latest session.</p>
+    <p><b>Order:</b> "Easy day or rest" first, then athletes with no recent data, then "Keep it moderate", then "Good to go"; more warnings sort higher.</p>
+    <p>Watch for a red sync line (their key may have expired) and for a big jump in weekly load with no matching recovery: that's when to check in.</p>`],
 };
 
 const infoButton = key => `<button type="button" class="info" data-info-key="${key}" aria-label="About ${INFO[key][0]}" aria-expanded="false">i</button>`;
@@ -778,6 +821,98 @@ function renderActivities() {
   box.scrollTop = box.scrollHeight;  // long ranges open on the most recent weeks
 }
 
+// ---------- all athletes ----------
+const OVERVIEW = "__all";
+const CUE_ORDER = { easy: 0, none: 1, moderate: 2, go: 3 };
+const isOverview = () => athlete === OVERVIEW;
+let overview = null;
+
+function spark(trend) {
+  const max = Math.max(1, ...trend.map(t => t.load)), w = 112 / trend.length;
+  return `<svg class="ov-spark" viewBox="0 0 112 30" aria-hidden="true">${trend.map((t, i) => {
+    const h = t.load ? Math.max(2, t.load / max * 30) : 0;
+    return `<rect class="${i === trend.length - 1 ? "today" : ""}" x="${i * w + 1}" y="${30 - h}" width="${w - 2}" height="${h}" rx="1.5"><title>${shortDate(t.date)}: ${fmt(t.load)} load</title></rect>`;
+  }).join("")}</svg>`;
+}
+
+function renderOverview() {
+  const flags = a => a.today.checks.filter(c => c.status === "flag");
+  const rows = [...overview].sort((a, b) => CUE_ORDER[a.today.cue.level] - CUE_ORDER[b.today.cue.level]
+    || flags(b).length - flags(a).length || a.name.localeCompare(b.name));
+  $("ov-grid").innerHTML = rows.map(a => {
+    const t = a.today, [cueVar, icon] = CUE_VARS[t.cue.level];
+    const st = formStatus(t.form, t.ctl), ac = acwrStatus(t.acwr);
+    const rhrDiff = t.rhr != null && t.rhr_baseline != null ? t.rhr - t.rhr_baseline : null;
+    const stat = (label, value, note, bad) =>
+      `<div class="${bad ? "bad" : ""}"><div class="label">${label}</div><div class="value">${value}</div><div class="note">${note || "&nbsp;"}</div></div>`;
+    const [syncText, syncErr] = statusText(a);
+    const dLoad = a.week.load - a.prev_week.load;
+    const last = a.last_activity;
+    const lastText = !last ? "No activities yet"
+      : `Last: ${shortDate(last.date)} · ${esc(last.name || last.sport)} · ${dur(last.duration_s)}${last.load ? ` · ${fmt(last.load)} load` : ""}`
+        + (a.days_since_activity >= 3 ? ` · ${a.days_since_activity} days ago` : "");
+    return `<button type="button" class="ov-card" data-id="${esc(a.id)}" style="--cue:var(${cueVar})">
+      <div class="ov-top"><span class="ov-name">${esc(a.name)}</span><span class="ov-sync${syncErr || a.stale ? " err" : ""}">${esc(syncText)}</span></div>
+      <div class="ov-cue"><span class="icon" aria-hidden="true">${icon}</span>${t.cue.label}${t.is_today ? "" : ` <small>as of ${shortDate(t.date)}</small>`}</div>
+      <div class="ov-stats">
+        ${stat("HRV", fmt(t.hrv), t.hrv_low != null ? `${fmt(t.hrv_low)}–${fmt(t.hrv_high)}` : "", t.hrv != null && t.hrv_low != null && t.hrv < t.hrv_low)}
+        ${stat("RHR", fmt(t.rhr), rhrDiff != null ? `${rhrDiff >= 0 ? "+" : "−"}${fmt(Math.abs(rhrDiff), 1)} vs avg` : "", rhrDiff != null && rhrDiff >= 3)}
+        ${stat("Sleep", t.sleep_h != null ? hm(t.sleep_h) : "–", t.sleep_score != null ? `score ${fmt(t.sleep_score)}` : "", (t.sleep_score != null && t.sleep_score < 60) || (t.sleep_h != null && t.sleep_h < 6))}
+        ${stat("ACWR", fmt(t.acwr, 2), ac ? ac[0] : "", t.acwr != null && t.acwr > 1.5)}
+        ${stat("Form", t.form != null ? `${t.form > 0 ? "+" : ""}${fmt(t.form)}` : "–", st ? st[0] : "", st && st[1] === "--serious")}
+      </div>
+      ${flags(a).length ? `<ul class="ov-flags">${flags(a).map(c => `<li>${esc(c.text)}</li>`).join("")}</ul>` : ""}
+      <div class="ov-week">
+        <div><b>${hm(a.week.hours)}</b> · ${fmt(a.week.load)} load · ${a.week.sessions} sessions<br>
+          last 7 days, ${dLoad >= 0 ? "▲" : "▼"} ${fmt(Math.abs(dLoad))} load vs the 7 before</div>
+        ${spark(a.trend)}
+      </div>
+      <div class="ov-last${a.days_since_activity >= 3 ? " stale" : ""}">${lastText}</div>
+    </button>`;
+  }).join("") || `<p class="sub">No athletes yet.</p>`;
+}
+
+async function loadOverview() {
+  const seq = ++loadSeq;
+  $("app").classList.add("loading");
+  try {
+    const res = await fetch("/api/overview");
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    if (seq !== loadSeq) return;
+    overview = body;
+    renderOverview();
+    const failed = body.filter(a => a.error).length;
+    setStatus(failed ? `${failed} athlete${failed > 1 ? "s" : ""} failed to sync` : `${body.length} athletes`, failed > 0);
+  } catch (e) {
+    if (seq === loadSeq) setStatus(`Could not load athletes: ${e.message}`, true);
+  } finally {
+    if (seq === loadSeq) $("app").classList.remove("loading");
+  }
+}
+
+// Sync athletes one at a time (all of them, or only those over an hour old) and refresh the cards.
+async function syncAll(onlyStale = false) {
+  const targets = (overview || []).filter(a => !onlyStale || a.stale).map(a => a.id);
+  if (!targets.length) return;
+  $("sync").disabled = true;
+  for (const [i, id] of targets.entries()) {
+    if (!isOverview()) break;
+    setStatus(`Syncing ${i + 1} of ${targets.length}…`);
+    try { await fetch(`/api/sync?${new URLSearchParams({ athlete: id })}`, { method: "POST" }); } catch (e) {}
+  }
+  $("sync").disabled = false;
+  if (isOverview()) await loadOverview();
+}
+
+function showView() {
+  $("overview").classList.toggle("hidden", !isOverview());
+  $("athlete-view").classList.toggle("hidden", isOverview());
+  $("presets").classList.toggle("hidden", isOverview());
+  $("custom").classList.toggle("hidden", isOverview() || range.days !== "custom");
+  $("sync").textContent = isOverview() ? "Sync all" : "Sync";
+}
+
 // ---------- data flow ----------
 function renderAll() {
   if (!data) return;
@@ -795,6 +930,7 @@ function statusText(st) {
 let loadSeq = 0;
 
 async function load() {
+  if (isOverview()) return loadOverview();
   const r = currentRange();
   if (!r.start || !r.end || !athlete) return;
   const seq = ++loadSeq;
@@ -816,6 +952,7 @@ async function load() {
 }
 
 async function sync() {
+  if (isOverview()) return syncAll();
   const target = athlete;
   $("sync").disabled = true; setStatus("Syncing with Garmin…");
   try {
@@ -833,16 +970,20 @@ async function sync() {
 async function loadAthletes() {
   const list = await (await fetch("/api/athletes")).json();
   const sel = $("athlete");
-  sel.innerHTML = list.map(a => `<option value="${a.id}">${a.name.replace(/</g, "&lt;")}</option>`).join("");
+  const many = list.length > 1;  // the overview only makes sense when coaching someone
+  sel.innerHTML = (many ? `<option value="${OVERVIEW}">All athletes</option>` : "") +
+    list.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("");
   sel.classList.toggle("hidden", list.length === 0);
-  if (!list.some(a => a.id === athlete)) athlete = list.length ? list[0].id : null;
+  if (!list.some(a => a.id === athlete) && !(many && isOverview())) athlete = many ? OVERVIEW : list.length ? list[0].id : null;
   sel.value = athlete || "";
   if (!athlete) setStatus("No athletes yet: add GARMIN_PERSONAL_API_KEY to .env or run `python -m dashboard athletes add NAME`", true);
 }
 
 async function showAthlete() {
+  showView();
   await load();
-  if (data && data.status.id === athlete && data.status.stale) sync();
+  if (isOverview()) syncAll(true);
+  else if (data && data.status.id === athlete && data.status.stale) sync();
 }
 
 function syncPresetButtons() {
@@ -875,6 +1016,11 @@ function init() {
   });
   $("sync").addEventListener("click", sync);
   $("athlete").addEventListener("change", e => { athlete = e.target.value; saveRange(); showAthlete(); });
+  $("ov-grid").addEventListener("click", e => {
+    const card = e.target.closest(".ov-card"); if (!card) return;
+    athlete = card.dataset.id; $("athlete").value = athlete; saveRange(); showAthlete();
+    window.scrollTo(0, 0);
+  });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
 
   loadAthletes().then(showAthlete);

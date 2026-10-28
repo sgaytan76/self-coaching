@@ -355,3 +355,32 @@ def dashboard_data(conn: sqlite3.Connection, start: dt.date, end: dt.date) -> di
         ],
         "sports": list(SPORTS),
     }
+
+
+OVERVIEW_DAYS = 7
+TREND_DAYS = 14
+
+
+def athlete_summary(conn: sqlite3.Connection, today: dt.date) -> dict:
+    """What a coach needs at a glance: readiness, this week vs last, recent trend, last session."""
+    ds = Dataset(conn, today)
+    week = days_between(today - dt.timedelta(days=OVERVIEW_DAYS - 1), today)
+    prev = days_between(today - dt.timedelta(days=2 * OVERVIEW_DAYS - 1), today - dt.timedelta(days=OVERVIEW_DAYS))
+
+    def totals(days):
+        rows = [ds.by_day[d.isoformat()] for d in days if d.isoformat() in ds.by_day]
+        return {"hours": round(sum(r["hours"] for r in rows), 1), "load": round(sum(r["load"] for r in rows)),
+                "sessions": sum(len(r["activities"]) for r in rows)}
+
+    trend = [{"date": d.isoformat(), "load": round(ds.by_day.get(d.isoformat(), {}).get("load", 0))}
+             for d in days_between(today - dt.timedelta(days=TREND_DAYS - 1), today)]
+    done = [a for a in ds.activities if a["date"] <= today.isoformat()]
+    last = done[-1] if done else None
+    return {
+        "today": readiness(ds, today),
+        "week": totals(week),
+        "prev_week": totals(prev),
+        "trend": trend,
+        "last_activity": {k: last[k] for k in ("date", "name", "sport", "duration_s", "load")} if last else None,
+        "days_since_activity": (today - dt.date.fromisoformat(last["date"])).days if last else None,
+    }

@@ -62,6 +62,13 @@ athlete's Garmin profile. Pick who to view from the athlete dropdown in the
 dashboard header; new athletes show up there after a page reload, without
 restarting the server.
 
+With two or more athletes the dropdown starts with **All athletes**: one card per
+athlete with this morning's readiness cue and any warnings, HRV, resting HR, sleep,
+ACWR and form, the last 7 days against the 7 before, a 14-day load sparkline, their
+latest session and sync status. Cards needing attention ("Easy day or rest", no
+recent data) come first; click one to open that athlete. **Sync all** syncs everyone
+in turn, and opening the overview syncs anyone whose data is over an hour old.
+
 Athletes can revoke access at any time by deleting their key in Garmin Connect.
 Garmin describes the Personal API as meant for users accessing their own data;
 coaching others with their keys is a gray area, so get their consent.

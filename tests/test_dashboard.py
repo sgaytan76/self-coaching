@@ -159,3 +159,28 @@ def test_readiness_falls_back_to_latest_morning(conn):
 def test_readiness_without_recovery_data_is_not_good_to_go(conn):
     result = readiness_for(conn, dt.date(2026, 10, 23))
     assert result["cue"]["level"] == "none"
+
+
+def test_athlete_summary_compares_weeks_and_finds_last_session(conn):
+    today = dt.date(2026, 10, 27)
+    seed_recovery(conn, today, hrv=46, rhr=50, score=82)
+    store.upsert_activity(conn, make_activity(1, "2026-10-15", "running", 40, 1.0))   # previous 7 days
+    store.upsert_activity(conn, make_activity(2, "2026-10-22", "cycling", 100, 2.0))  # this week
+    store.upsert_activity(conn, make_activity(3, "2026-10-24", "lap_swimming", 30, 1.0))
+    store.upsert_activity(conn, make_activity(4, "2026-10-29", "running", 99, 1.0))   # future: ignored
+    conn.commit()
+
+    s = metrics.athlete_summary(conn, today)
+    assert s["week"] == {"hours": 3.0, "load": 130, "sessions": 2}
+    assert s["prev_week"] == {"hours": 1.0, "load": 40, "sessions": 1}
+    assert len(s["trend"]) == 14 and s["trend"][-1]["date"] == "2026-10-27"
+    assert [t["load"] for t in s["trend"] if t["load"]] == [40, 100, 30]
+    assert s["last_activity"]["date"] == "2026-10-24" and s["last_activity"]["sport"] == "Swim"
+    assert s["days_since_activity"] == 3
+    assert s["today"]["is_today"] and s["today"]["cue"]["level"] in {"go", "moderate", "easy"}
+
+
+def test_athlete_summary_without_activities(conn):
+    s = metrics.athlete_summary(conn, dt.date(2026, 10, 27))
+    assert s["last_activity"] is None and s["days_since_activity"] is None
+    assert s["week"]["sessions"] == 0 and s["today"]["cue"]["level"] == "none"
